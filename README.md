@@ -1,0 +1,47 @@
+# MVStreamRefine
+
+双 RealSense（head 固定 + wrist 眼在手上）离线 RGB-D 数据的 object-centric 增量重建。
+完整开发计划见 `PLAN_object_reconstruction.md`。
+
+## 仓库结构
+
+```text
+data/                      离线采集数据（113 帧 head/wrist RGB-D + pose + 标定）
+src/segmention/sam2/       自包含 SAM 2.1 推理包（sam2-inference）
+src/object_reconstruction/ 重建工程（按 PLAN Task 顺序实现中）
+tools/                     CLI 工具
+configs/offline.yaml       离线 pipeline 配置
+Dockerfile / compose.yaml  部署镜像（CUDA 12.1 runtime，RTX 3060 + driver 535）
+```
+
+## 本地开发（Task 1 数据检查）
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[test]"
+python tools/inspect_dataset.py --config configs/offline.yaml
+pytest
+```
+
+## Docker 部署（目标机：RTX 3060，driver 535）
+
+```bash
+# 先验证 NVIDIA Container Toolkit
+docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
+
+docker compose build
+docker compose run --rm reconstruction \
+  python3 tools/inspect_dataset.py --config configs/offline.yaml
+```
+
+SAM 2.1 checkpoint 不入库，放在 `checkpoints/` 并通过只读 volume 挂载为
+`/models/sam2.1_hiera_tiny.pt`。
+
+## 当前阻塞项（融合前必须由采集端确认）
+
+- `pose_semantics`：`frame-*_pose.txt` / `JointStates.txt` 7D 位姿的语义
+- `quaternion_order`：xyzw 还是 wxyz
+- `handeye_convention`：`data/handeye/handeye_tf.txt` 两个矩阵的源/目标坐标系
+- `depth.scale`：16-bit depth PNG 的单位
+
+确认后填入 `configs/offline.yaml`，否则 pipeline 在数据检查后 fail fast。

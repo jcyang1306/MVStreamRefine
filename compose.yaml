@@ -1,0 +1,16 @@
+services:
+  reconstruction:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mvstreamrefine:cu121
+    gpus: all
+    shm_size: "8gb"
+    environment:
+      SAM2_CHECKPOINT: /models/sam2.1_hiera_tiny.pt
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./checkpoints:/models:ro
+      - ./output:/workspace/output

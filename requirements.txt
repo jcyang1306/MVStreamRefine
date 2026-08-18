@@ -1,0 +1,10 @@
+# Reconstruction runtime dependencies.
+# torch / torchvision are intentionally absent: they are installed first in the
+# Dockerfile from the cu121 index and must not be overridden here.
+# Pin exact versions after the first successful container smoke test (PLAN 3.2).
+numpy>=1.24.4
+pillow>=9.4.0
+PyYAML>=6.0
+opencv-python-headless>=4.8
+open3d>=0.18
+tqdm>=4.66.1

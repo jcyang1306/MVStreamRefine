@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "object-reconstruction"
+version = "0.1.0"
+description = "Object-centric incremental RGB-D reconstruction from dual RealSense offline data"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24.4",
+  "pillow>=9.4.0",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["object_reconstruction*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]

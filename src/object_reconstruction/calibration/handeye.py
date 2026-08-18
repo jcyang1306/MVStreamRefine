@@ -1,0 +1,31 @@
+"""Parser for data/handeye/handeye_tf.txt.
+
+The file contains two labeled 4x4 matrices ("wrist_cam:" and "head_cam:") in a
+loose bracketed text format. Their source/target frame convention is NOT encoded
+in the file and must be confirmed via config (handeye_convention) before any of
+these matrices may be composed into T_world_cam2.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import numpy as np
+
+_FLOAT = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
+
+
+def load_handeye_matrices(path: str | Path) -> dict[str, np.ndarray]:
+    text = Path(path).read_text()
+    labels = re.findall(r"(\w+)\s*:", text)
+    if not labels:
+        raise ValueError(f"{path}: no labeled matrices found")
+    matrices: dict[str, np.ndarray] = {}
+    blocks = re.split(r"\w+\s*:", text)[1:]
+    for label, block in zip(labels, blocks):
+        values = [float(v) for v in _FLOAT.findall(block)]
+        if len(values) != 16:
+            raise ValueError(f"{path}: block '{label}' has {len(values)} values, expected 16")
+        matrices[label] = np.array(values, dtype=np.float64).reshape(4, 4)
+    return matrices

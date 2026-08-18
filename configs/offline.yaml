@@ -1,0 +1,78 @@
+dataset:
+  root: "./data"
+  layout: "current_flat"
+  cam1_prefix: "head"
+  cam2_prefix: "wrist"
+  frame_count_expected: 113
+  pose_source: "JointStates.txt"
+  # 以下三项必须根据采集端定义填写；null 时数据检查只报告 raw 值并标记阻塞。
+  pose_semantics: null      # 例如 "T_base_tcp"
+  quaternion_order: null    # "xyzw" 或 "wxyz"
+  handeye_convention: null  # handeye_tf.txt 中矩阵的源/目标坐标系定义
+
+world_frame: "head_optical"
+
+devices:
+  sam2: "cuda"
+  tsdf: "CPU:0"
+
+depth:
+  # 16-bit PNG 的单位必须由采集端确认；null 时禁止融合。
+  scale: null
+  min_m: 0.15
+  max_m: 1.2
+
+mask:
+  source: "cache"
+  erosion_px: 3
+  min_area_px: 1000
+
+sam2:
+  enabled: true
+  checkpoint: "/models/sam2.1_hiera_tiny.pt"
+  model_type: "tiny"
+  mode: "video"
+  object_id: 1
+  prompt_type: "box"
+  staging_root: "./output/sam2_frames"
+  run_streams_sequentially: true
+  offload_video_to_cpu: true
+  offload_state_to_cpu: false
+  cache_masks: true
+
+cam1:
+  initial_frames: 10
+  update_interval_frames: 30
+  max_integrations: 30
+
+keyframe:
+  translation_m: 0.02
+  rotation_deg: 5.0
+  min_mask_area_px: 1000
+  min_valid_depth_ratio: 0.7
+
+tsdf:
+  device: "CPU:0"
+  voxel_size_m: 0.002
+  block_resolution: 16
+  block_count: 50000
+  trunc_voxel_multiplier: 4.0
+  depth_max_m: 1.2
+  weight_threshold: 3.0
+
+icp:
+  enabled: false
+  max_correspondence_distance_m: 0.01
+  min_fitness: 0.4
+  max_rmse_m: 0.008
+  max_translation_correction_m: 0.02
+  max_rotation_correction_deg: 5.0
+
+visualization:
+  enabled: true
+  update_every_keyframes: 5
+
+output:
+  root: "./output"
+  save_keyframes: true
+  save_debug: true
