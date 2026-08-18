@@ -6,8 +6,8 @@
 
 已知条件：
 
-- `RealSense1`：固定相机，定义世界坐标系 `WORLD = C1`。
-- `RealSense2`：眼在手上，随机械臂运动。
+- `RealSense1 = head = cam1`：固定相机，定义世界坐标系 `WORLD = head optical frame`。
+- `RealSense2 = wrist = cam2`：眼在手上，随机械臂运动。
 - 对每个时间点能够拿到同步数据：
   - `rgb1`
   - `depth1`
@@ -18,7 +18,7 @@
   - `T_world_cam1 = I`
 - 场景中央存在静态物体 A。
 - 两个相机都可以观察到物体 A。
-- 使用 SAM3 得到物体 A 的 mask。
+- 使用仓库内 `src/segmention/sam2` 提供的 SAM 2.1 推理包得到物体 A 的 mask。
 - 最终目标：
   1. 离线数据首先跑通；
   2. RealSense2 运动过程中，物体点云逐渐完整；
@@ -37,7 +37,7 @@
 ```text
 Offline RGB-D
     ↓
-SAM3 mask
+SAM 2.1 mask
     ↓
 Masked RGB-D
     ↓
@@ -99,9 +99,9 @@ p_A = T_A_B @ p_B
 统一：
 
 ```text
-WORLD = RealSense1 optical frame
-C1    = RealSense1 optical frame
-C2    = RealSense2 optical frame
+WORLD = head optical frame
+C1    = head optical frame（RealSense1）
+C2    = wrist optical frame（RealSense2）
 ```
 
 因此：
@@ -142,6 +142,8 @@ T_cam_world = np.linalg.inv(T_world_cam)
 ```text
 object_reconstruction/
 ├── README.md
+├── Dockerfile
+├── compose.yaml
 ├── requirements.txt
 ├── pyproject.toml
 ├── configs/
@@ -164,7 +166,7 @@ object_reconstruction/
 │       │
 │       ├── segmentation/
 │       │   ├── base.py
-│       │   ├── sam3_segmenter.py
+│       │   ├── sam2_segmenter.py
 │       │   └── mask_cache.py
 │       │
 │       ├── geometry/
@@ -214,11 +216,194 @@ object_reconstruction/
     └── logs/
 ```
 
+## 3.1 当前仓库模块边界
+
+当前仓库已经包含可独立安装的 SAM 2.1 最小推理包：
+
+```text
+src/segmention/sam2/
+├── src/sam2/
+├── src/sam2_inference/
+├── examples/
+├── tests/
+├── pyproject.toml
+└── Dockerfile
+```
+
+重建工程只依赖其稳定公开接口：
+
+```python
+from sam2_inference import ImageSegmenter, VideoTracker, StreamTracker
+```
+
+禁止从 reconstruction 代码直接调用 `sam2` 内部 predictor 的私有方法。也不要同时安装官方
+`SAM-2` wheel 和本仓库的 `sam2-inference`，两者会占用同一个 `sam2` Python 模块名。
+
+除上述 SAM 2.1 子包外，本节规划的 `object_reconstruction/`、`configs/`、`tools/`、
+mask cache 和 TSDF 主工程当前均尚未实现，仍属于后续 Task 的目标结构。仓库中也不包含
+SAM 2.1 `.pt/.pth` 权重；checkpoint 必须作为外部只读文件挂载，禁止打进应用镜像或提交
+到 Git。
+
+当前 `src/` 尚未被 Git 跟踪。开始实现 Task 1 前必须明确把 SAM 2.1 子包作为普通源码
+纳入版本管理，或固定为带 commit SHA 的 submodule；否则 Docker/CI 无法从干净 checkout
+复现。不要依赖开发机上未跟踪的目录。
+
+## 3.2 Docker / GPU 环境基线（RTX 3060 + NVIDIA 535）
+
+宿主机 `nvidia-smi` 显示的 `CUDA Version: 12.2` 表示 **535 驱动可支持的最高 CUDA
+driver API**，不表示容器必须安装 CUDA 12.2 toolkit。当前 SAM 2.1 子包的 Dockerfile
+采用以下固定组合；根工程镜像仍待实现和整体验证：
+
+```text
+container CUDA runtime : 12.1.1 + cuDNN 8
+PyTorch wheel          : torch 2.5.1 + cu121
+torchvision wheel      : torchvision 0.20.1 + cu121
+Python                 : 3.10（Ubuntu 22.04 默认）
+host NVIDIA driver     : 535（满足 CUDA 12.1 runtime 要求）
+GPU                    : RTX 3060 / compute capability 8.6
+```
+
+因此容器统一使用 CUDA 12.1，而不是混装系统 CUDA 12.2、pip CUDA 库和其他版本的
+PyTorch。宿主机只需要：
+
+```text
+NVIDIA driver 535
+Docker Engine
+NVIDIA Container Toolkit
+```
+
+Task 1 创建根 `Dockerfile`、`requirements.txt` 和 Python 包之后，按下面的目标模板从
+仓库根目录构建主镜像；在这些文件落地前，根目录的 `docker build` 命令不可运行：
+
+```dockerfile
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip python3-venv libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY src/segmention/sam2 /tmp/sam2-inference
+RUN python3 -m pip install --upgrade pip \
+ && python3 -m pip install \
+      torch==2.5.1 torchvision==0.20.1 \
+      --index-url https://download.pytorch.org/whl/cu121 \
+ && python3 -m pip install /tmp/sam2-inference
+
+COPY . /workspace
+# requirements.txt 不得再次声明 torch/torchvision 或覆盖 cu121 wheel。
+RUN python3 -m pip install -r requirements.txt \
+ && python3 -m pip install -e .
+
+CMD ["python3", "tools/run_offline_reconstruction.py", "--config", "configs/offline.yaml"]
+```
+
+`requirements.txt` 至少覆盖 reconstruction 自身的 NumPy、Pillow、PyYAML、OpenCV 和
+Open3D 依赖；在完成容器 smoke test 后生成锁定文件，禁止部署时无版本地安装“最新版”。
+SAM 2.1 包自身的最低依赖以 `src/segmention/sam2/pyproject.toml` 为准。
+
+运行示例：
+
+```bash
+docker build -t mvstreamrefine:cu121 .
+docker run --rm --gpus all \
+  --shm-size=8g \
+  -e SAM2_CHECKPOINT=/models/sam2.1_hiera_tiny.pt \
+  -v "$PWD/data:/workspace/data:ro" \
+  -v "$PWD/checkpoints:/models:ro" \
+  -v "$PWD/output:/workspace/output" \
+  mvstreamrefine:cu121
+```
+
+对应的目标 `compose.yaml`：
+
+```yaml
+services:
+  reconstruction:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mvstreamrefine:cu121
+    gpus: all
+    shm_size: "8gb"
+    environment:
+      SAM2_CHECKPOINT: /models/sam2.1_hiera_tiny.pt
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./checkpoints:/models:ro
+      - ./output:/workspace/output
+```
+
+要求使用支持 `gpus: all` 的 Docker Compose v2。构建主镜像前先独立验证宿主机
+NVIDIA Container Toolkit：
+
+```bash
+docker run --rm --gpus all \
+  nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
+```
+
+容器启动 smoke test：
+
+```bash
+nvidia-smi
+python3 -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python3 -c "import sam2, sam2_inference; print('SAM2 import OK')"
+```
+
+预期 `torch.version.cuda == "12.1"` 且 `torch.cuda.is_available() is True`。若后者为
+False，先检查 NVIDIA Container Toolkit 和 `--gpus all`，不要在容器里安装宿主机驱动。
+不要把宿主机 `/usr/local/cuda-12.2` 挂入容器，也不要显式透传指向宿主机 CUDA 的
+`LD_LIBRARY_PATH`；容器只使用镜像和 cu121 wheel 内的库。
+
+安装 Open3D 后还要单独验证其设备能力：
+
+```bash
+python3 - <<'PY'
+import open3d as o3d
+print("open3d", o3d.__version__)
+print("open3d CUDA available", o3d.core.cuda.is_available())
+grid = o3d.t.geometry.VoxelBlockGrid(
+    attr_names=("tsdf", "weight", "color"),
+    attr_dtypes=(o3d.core.float32, o3d.core.float32, o3d.core.uint8),
+    attr_channels=((1,), (1,), (3,)),
+    voxel_size=0.01,
+    block_resolution=16,
+    block_count=100,
+    device=o3d.core.Device("CPU:0"),
+)
+print("Open3D CPU VoxelBlockGrid OK")
+PY
+```
+
+普通 `pip install` 默认不编译 SAM 2.1 的 connected-components CUDA 扩展，不需要
+`nvcc`，只会跳过小孔填充后处理，适合作为第一版。若确认必须启用该扩展，改用
+`nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04` 构建阶段，并执行：
+
+```bash
+SAM2_BUILD_CUDA=1 python3 -m pip install --no-build-isolation /tmp/sam2-inference
+```
+
+`open3d` 的普通 pip wheel 是否支持 CUDA必须在镜像内实测，不能因为 PyTorch 可见 GPU
+就假定 Open3D 也可见。MVP 默认让 SAM 2.1 使用 GPU、TSDF 使用 `CPU:0`；只有使用
+CUDA-enabled Open3D 构建并通过最小积分测试后，才把 TSDF 改为 `CUDA:0`。
+
+RTX 3060 显存有限且存在桌面版/移动版容量差异。部署前执行
+`nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv`。默认选
+`sam2.1_hiera_tiny`，离线的 head/wrist 两路顺序运行并在两路之间释放 tracker；
+不要默认并发常驻两个 large 模型。
+
 ---
 
 # 4. 核心数据模型
 
-在 `data/models.py` 定义 dataclass。
+在 `src/object_reconstruction/data/models.py` 定义 dataclass。仓库根 `data/` 只存放
+采集数据，不放 Python 源码。
 
 ```python
 @dataclass
@@ -243,7 +428,7 @@ class CameraFrame:
 @dataclass
 class FramePacket:
     index: int
-    timestamp: float
+    timestamp: float | None
 
     cam1: CameraFrame
     cam2: CameraFrame
@@ -252,6 +437,7 @@ class FramePacket:
     T_world_cam2: np.ndarray
 
     tcp_pose: np.ndarray | None = None
+    raw_pose_7d: np.ndarray | None = None
 ```
 
 要求：
@@ -282,6 +468,63 @@ float64
 
 不要让 reconstruction pipeline 直接适配当前所有杂乱文件格式。
 
+## 5.1 当前 `data/` 的真实格式
+
+当前数据集共 113 帧（index `000000`～`000112`），每个 index 均完整包含：
+
+```text
+data/
+├── frame-000000_head_color.jpg    # 1280 x 720, 8-bit JPEG
+├── frame-000000_head_depth.png    # 1280 x 720, 16-bit 单通道 PNG
+├── frame-000000_wrist_color.jpg
+├── frame-000000_wrist_depth.png
+├── frame-000000_pose.txt          # 7 个数
+├── ...
+├── JointStates.txt                # 113 x 7，和逐帧 pose 仅有文本精度差
+├── intrinsic/
+│   ├── head_cam_K.txt             # 3 x 3
+│   └── wrist_cam_K.txt            # 3 x 3
+└── handeye/
+    └── handeye_tf.txt             # wrist_cam/head_cam 两个 4 x 4 矩阵
+```
+
+第一版明确映射：
+
+```text
+head  -> cam1 / 固定相机 / WORLD
+wrist -> cam2 / 眼在手上相机
+```
+
+当前数据没有显式 timestamp，离线同步只能以 frame index 为准，`FramePacket.timestamp`
+设为 `None`，不得伪造采样周期。`JointStates.txt` 虽然文件名如此，但内容是 7 维量而
+不是常见的多关节角数组；每帧 `frame-xxxxxx_pose.txt` 是它的低精度副本。实现时选
+`JointStates.txt` 为数值源、逐帧文件用于完整性交叉检查。
+
+当前内参文件解析结果应作为 loader 单元测试 fixture：
+
+```text
+head : fx=908.781982421875, fy=908.7359619140625,
+       cx=648.3536376953125, cy=370.1097106933594
+wrist: fx=653.2439575195312, fy=652.7537231445312,
+       cx=636.3500366210938, cy=358.8265380859375
+```
+
+以下语义在开始坐标变换前必须由数据采集端确认并写进 config：
+
+```text
+pose 7D 的定义：translation + quaternion？
+quaternion 顺序：xyzw 还是 wxyz？
+pose 表示 T_base_tcp 还是其逆？
+handeye 中 wrist_cam/head_cam 的源坐标系、目标坐标系和单位
+depth PNG 的单位及 depth_scale
+RGB 与 depth 是否已经像素对齐
+内参是否对应当前 1280 x 720 对齐后的图像
+```
+
+文件存在并不等于这些 convention 已经确定。未确认前只允许完成数据检查，禁止融合。
+
+## 5.2 标准化适配层
+
 先实现：
 
 ```text
@@ -289,6 +532,10 @@ OfflineFrameSource
 ```
 
 它负责把现有数据转换成统一的 `FramePacket`。
+
+`OfflineFrameSource` 首先直接支持上述 flat layout，并在内存中完成
+`head/wrist -> cam1/cam2` 映射；`normalize_dataset.py` 再按需生成下面的可移植布局，
+不要复制一份数据后才允许做 Phase 0。
 
 推荐标准化数据格式：
 
@@ -316,13 +563,24 @@ dataset/
 
 ```json
 {
-  "timestamp": 0.0,
+  "timestamp": null,
   "T_world_cam2": [
     [1, 0, 0, 0],
     [0, 1, 0, 0],
     [0, 0, 1, 0],
     [0, 0, 0, 1]
   ]
+}
+```
+
+建议在 manifest / pose metadata 中同时保留：
+
+```json
+{
+  "source_index": 0,
+  "timestamp": null,
+  "raw_pose_7d": [0.19252, -0.202075, 0.262422, 0.799332013, 0.108328487, -0.530382538, 0.260821078],
+  "raw_pose_convention": "由采集端确认后填写"
 }
 ```
 
@@ -342,6 +600,16 @@ T_tcp_cam2
 T_world_cam2
 ```
 
+若采集端最终确认 `pose = T_base_tcp`、`head_cam = T_base_head`、
+`wrist_cam = T_tcp_wrist`，且 `WORLD = head`，则唯一允许的组合公式是：
+
+```python
+T_world_cam2 = np.linalg.inv(T_base_head) @ T_base_tcp @ T_tcp_wrist
+```
+
+这只是基于**已确认语义**的公式，不得直接把 `handeye_tf.txt` 中的标签当作上述方向。
+若任一矩阵定义相反，应在 calibration loader 边界统一求逆并改名，pipeline 内不做猜测。
+
 重建模块不要知道 robot base / TCP / hand-eye 的存在。
 
 ---
@@ -359,17 +627,25 @@ tools/inspect_dataset.py
 检查每一帧：
 
 ```text
+五类逐帧文件是否均为连续 000000~000112
 RGB1 / depth1 shape
 RGB2 / depth2 shape
 timestamp
 depth dtype
 depth min/max
 valid depth ratio
-T_world_cam2
-rotation determinant
-transform bottom row
-translation range
+T_world_cam2（仅 conventions 已确认时）
+rotation determinant（同上）
+transform bottom row（同上）
+translation range（同上）
+JointStates 行与逐帧 pose 的一致性
+内参矩阵有限、fx/fy > 0、主点在图像范围内
+handeye 旋转 determinant 与齐次矩阵末行
 ```
+
+当 `pose_semantics`、`quaternion_order` 或 `handeye_convention` 仍为 `null` 时，
+`inspect_dataset.py` 只能检查 raw pose、内参、图像和 handeye 矩阵本身，并在报告中标记
+阻塞项；此时禁止构造或验证 `T_world_cam2`，更不能假装它已满足旋转/平移检查。
 
 同时输出：
 
@@ -394,7 +670,7 @@ RGB2 | Depth2
 
 ## 验收标准
 
-- 数据帧数量正确；
+- 113 个 frame index 均具有 head/wrist RGB、depth 和 pose；
 - RGB/depth 尺寸对应；
 - depth 单位明确；
 - camera intrinsics 正确；
@@ -403,7 +679,7 @@ RGB2 | Depth2
 
 ---
 
-# 7. Phase 1 — 先不用 SAM3，不用 TSDF，验证坐标变换
+# 7. Phase 1 — 先不用 SAM 2.1，不用 TSDF，验证坐标变换
 
 这是整个项目最重要的 debug 阶段。
 
@@ -487,7 +763,7 @@ cam2 = 另一种颜色
 2. hand-eye transform 是否方向反了；
 3. mm / m 是否混用；
 4. RealSense optical frame 和机械臂 camera frame 是否混淆；
-5. timestamp 是否错位；
+5. 当前离线集的 head/wrist/pose frame index 是否错位；实时数据再检查 timestamp；
 6. depth 是否和 RGB 对齐；
 7. 内参是否对应当前 resolution。
 
@@ -507,9 +783,9 @@ camera trajectory
 
 ---
 
-# 8. Phase 2 — SAM3 离线 mask 预计算
+# 8. Phase 2 — SAM 2.1 离线 mask 预计算
 
-SAM3 不要直接耦合在 TSDF 类里。
+SAM 2.1 不要直接耦合在 TSDF 类里。
 
 定义：
 
@@ -526,15 +802,43 @@ class ObjectSegmenter(Protocol):
 实现：
 
 ```text
-SAM3Segmenter
+SAM2Segmenter
 ```
+
+`SAM2Segmenter` 是 reconstruction 侧 adapter，内部只调用仓库提供的公开 API：
+
+```python
+tracker = VideoTracker(
+    checkpoint=config.checkpoint,
+    model_type=config.model_type,  # tiny / small / base_plus / large
+    device=config.device,          # cuda / cpu / auto
+)
+tracker.open(numbered_jpeg_dir)
+tracker.add_prompt(0, object_id=1, box=box_xyxy)
+for result in tracker.track():
+    mask = result.masks[0]  # bool, H x W，源图分辨率
+tracker.close()
+```
+
+当前 `data/` 混放两路 JPEG，不能直接把根目录传给 `VideoTracker.open()`。预计算工具应
+分别建立只含连续编号 JPEG 的 staging 目录（可用 symlink，避免重复占用空间）：
+
+```text
+output/sam2_frames/head/00000.jpg  -> data/frame-000000_head_color.jpg
+output/sam2_frames/head/00001.jpg  -> data/frame-000001_head_color.jpg
+output/sam2_frames/wrist/00000.jpg -> data/frame-000000_wrist_color.jpg
+...
+```
+
+`VideoTracker` 的 JPEG 目录要求纯数字文件名。输出的 `frame_index` 必须通过 staging
+manifest 显式映射回原始 frame index。
 
 离线阶段推荐：
 
 ```text
 第一帧
   ↓
-人工 point / box / text prompt
+人工 point / box / initial mask prompt
   ↓
 初始化物体 A
   ↓
@@ -545,7 +849,8 @@ video tracking
 disk cache
 ```
 
-RealSense1 和 RealSense2 各自作为独立 video stream 运行 SAM3 tracking。
+head 和 wrist 各自作为独立 video stream 运行 SAM 2.1 tracking。RTX 3060 上离线默认
+顺序执行两路；每一路结束后 `close()`、删除 tracker，并清理不再需要的 CUDA cache。
 
 输出：
 
@@ -583,7 +888,12 @@ reconstruction
 优先读取 mask cache
 ```
 
-而不是每次重新执行 SAM3。
+而不是每次重新执行 SAM 2.1。
+
+prompt 支持正/负 point、`xyxy` box 或初始 bool mask；MVP 使用首帧人工 box，必要时在
+漂移帧追加修正 prompt。Video tracking 没有质量分数，`scores is None`，因此不能把
+不存在的 SAM score 写进质量门限；使用 mask area、与前一帧 IoU、有效 depth ratio 和
+人工抽检作为缓存质量指标。
 
 ---
 
@@ -631,7 +941,8 @@ mask:
   min_area_px: 1000
 
 depth:
-  scale: 1000.0
+  # 当前 16-bit depth PNG 的单位经采集端确认后填写。
+  scale: null
   min_m: 0.15
   max_m: 1.2
 ```
@@ -694,7 +1005,8 @@ T_cam_world = np.linalg.inv(T_world_cam)
 
 ```yaml
 tsdf:
-  device: "CUDA:0"
+  # 普通 Open3D pip wheel 的 MVP 安全默认值。
+  device: "CPU:0"
   voxel_size_m: 0.002
   block_resolution: 16
   block_count: 50000
@@ -703,12 +1015,18 @@ tsdf:
   weight_threshold: 3.0
 ```
 
-CPU fallback：
+`block_count: 50000` 只作为 CPU baseline 上限，运行时必须监控宿主机内存。若目标镜像
+已验证 Open3D CUDA，在 RTX 3060 上先从 `block_count: 10000` 开始，根据实际占用逐步
+提高，且不要与 SAM 2.1 mask 预计算并发。
+
+只有 CUDA-enabled Open3D 已在目标镜像中通过 smoke test 时才覆盖：
 
 ```text
-如果 CUDA 不可用：
-device = CPU:0
+tsdf.device = CUDA:0
 ```
+
+PyTorch 的 `torch.cuda.is_available()` 不能作为 Open3D CUDA 可用性的证据；启动时必须
+分别探测并在请求了 `CUDA:0` 但 Open3D 不支持时 fail fast，不要静默改变计算设备。
 
 ---
 
@@ -1220,6 +1538,11 @@ FramePacket
 
 不要把 pyrealsense2 API 泄漏到 reconstruction 模块。
 
+实时 RealSense 运行于 Docker 时还需要 USB 设备透传、设备权限和 pyrealsense2/librealsense
+兼容性验证。Task 12 应先决定使用宿主机采集进程向容器传输 `FramePacket`，还是向容器
+显式映射 `/dev/bus/usb`；不要为了省事默认使用 `--privileged`。这不影响当前只挂载
+离线 `data/` 的 MVP 镜像。
+
 实时版本：
 
 ```text
@@ -1254,7 +1577,7 @@ ReconstructionPipeline
 ```text
 Capture Thread
       ↓ Queue
-SAM3 Worker
+SAM 2.1 StreamTracker Worker
       ↓ Queue
 Geometry / Keyframe Worker
       ↓
@@ -1295,14 +1618,26 @@ keep newest frame
 
 ```yaml
 dataset:
-  root: "/path/to/dataset"
+  root: "/workspace/data"
+  layout: "current_flat"
+  cam1_prefix: "head"
+  cam2_prefix: "wrist"
+  frame_count_expected: 113
+  pose_source: "JointStates.txt"
+  # 以下三项必须根据采集端定义填写；null 时数据检查应 fail fast。
+  pose_semantics: null
+  quaternion_order: null
+  handeye_convention: null
 
-world_frame: "realsense1"
+world_frame: "head_optical"
 
-device: "CUDA:0"
+devices:
+  sam2: "cuda"
+  tsdf: "CPU:0"
 
 depth:
-  scale: 1000.0
+  # 必须由采集配置确认；16-bit PNG 本身不能证明单位。
+  scale: null
   min_m: 0.15
   max_m: 1.2
 
@@ -1311,8 +1646,17 @@ mask:
   erosion_px: 3
   min_area_px: 1000
 
-sam3:
+sam2:
   enabled: true
+  checkpoint: "/models/sam2.1_hiera_tiny.pt"
+  model_type: "tiny"
+  mode: "video"
+  object_id: 1
+  prompt_type: "box"
+  staging_root: "./output/sam2_frames"
+  run_streams_sequentially: true
+  offload_video_to_cpu: true
+  offload_state_to_cpu: false
   cache_masks: true
 
 cam1:
@@ -1326,6 +1670,7 @@ keyframe:
   min_valid_depth_ratio: 0.7
 
 tsdf:
+  device: "CPU:0"
   voxel_size_m: 0.002
   block_resolution: 16
   block_count: 50000
@@ -1355,7 +1700,8 @@ output:
 
 # 24. CLI
 
-最终至少支持：
+以下是 Task 实现完成后的目标 CLI；对应 `tools/` 和 `configs/` 当前尚不存在，因此现在
+不可直接运行。每个命令应随对应 Task 落地后再加入 smoke test。
 
 ## 检查数据
 
@@ -1504,6 +1850,22 @@ Cursor 不要一次性生成完整系统。
 
 严格按照以下顺序。
 
+## Task 0
+
+先建立可复现基线：
+
+```text
+将 src/segmention/sam2 纳入 Git 或固定为 submodule commit
+创建根 Dockerfile、compose.yaml、requirements.txt 和最小 Python 包
+构建 SAM2/cu121 镜像并验证 RTX 3060 可见
+在容器 smoke test 后锁定 reconstruction 依赖版本
+确认 checkpoint 通过只读 volume 提供
+```
+
+Task 0 不实现重建算法。
+
+---
+
 ## Task 1
 
 实现：
@@ -1544,7 +1906,7 @@ cam1 + moving cam2 point cloud
 实现：
 
 ```text
-sam3_segmenter.py
+sam2_segmenter.py
 mask_cache.py
 precompute_masks.py
 ```
@@ -1708,13 +2070,16 @@ frame dropping
 只有同时满足下面条件，才认为离线 MVP 跑通。
 
 - [ ] 可以完整读取离线同步数据。
+- [ ] `pose_semantics`、`quaternion_order`、`handeye_convention` 和 `depth.scale` 均已确认，配置不再 fail fast。
 - [ ] camera1 / camera2 内参正确。
 - [ ] `T_world_cam2` convention 完全明确。
 - [ ] Cam2 运动时，物体 world PCD 基本保持稳定。
-- [ ] SAM3 可以稳定获得物体 A mask。
+- [ ] SAM 2.1 可以在 RTX 3060 容器中稳定获得物体 A mask。
+- [ ] SAM 2.1 真实 checkpoint smoke test 在目标容器中通过。
 - [ ] mask 可缓存。
 - [ ] masked RGB-D 正确。
 - [ ] Open3D TSDF 可以逐 keyframe integrate。
+- [ ] Open3D `CPU:0` VoxelBlockGrid smoke test 在目标容器中通过。
 - [ ] cam1 + cam2 可以融合。
 - [ ] Cam2 移动时模型逐渐完整。
 - [ ] 可以实时/准实时显示当前 point cloud。
