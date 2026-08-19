@@ -38,7 +38,7 @@ def test_intrinsics_rejects_bad_principal_point():
 
 def test_handeye_matrices_are_rigid():
     matrices = load_handeye_matrices(DATA_ROOT / "handeye" / "handeye_tf.txt")
-    assert set(matrices) == {"wrist_cam", "head_cam"}
+    assert set(matrices) == {"wrist_cam2", "base_cam1"}
     for T in matrices.values():
         assert T.shape == (4, 4)
         assert abs(np.linalg.det(T[:3, :3]) - 1.0) < 1e-3

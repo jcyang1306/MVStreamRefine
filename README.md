@@ -42,11 +42,20 @@ docker compose run --rm reconstruction \
 SAM 2.1 checkpoint 不入库，放在 `checkpoints/` 并通过只读 volume 挂载为
 `/models/sam2.1_hiera_tiny.pt`。
 
-## 当前阻塞项（融合前必须由采集端确认）
+## 数据语义（已确认，2026-08-19）
 
-- `pose_semantics`：`frame-*_pose.txt` / `JointStates.txt` 7D 位姿的语义
-- `quaternion_order`：xyzw 还是 wxyz
-- `handeye_convention`：`data/handeye/handeye_tf.txt` 两个矩阵的源/目标坐标系
-- `depth.scale`：16-bit depth PNG 的单位
+- `pose_semantics = T_base_tcp`：7D 位姿为 `x,y,z,qx,qy,qz,qw`
+- `quaternion_order = xyzw`
+- `handeye`：`wrist_cam2 = T_tcp_cam2`，`base_cam1 = T_base_cam1`
+- `depth.scale = 1000.0`（采集端将米 ×1000 存为 uint16 mm）
 
-确认后填入 `configs/offline.yaml`，否则 pipeline 在数据检查后 fail fast。
+`T_world_cam2 = inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2`（WORLD = cam1/head）。
+
+## 坐标变换验证状态
+
+`tools/validate_transforms.py` 实测通过（2026-08-19，重标定 `base_cam1` 后）：
+
+- cam2 运动时静止场景世界点云跨帧一致性 0.71（翻转 wrist 手眼后降至 0.44）；
+- cam2 点云与固定 cam1 点云跨相机重叠 0.34（所有翻转变体仅 0.01–0.02）。
+
+当前无阻塞项，双相机融合链路可用。

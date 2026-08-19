@@ -11,9 +11,13 @@ Layout:
 
 Mapping: head -> cam1 (fixed, WORLD), wrist -> cam2 (eye-in-hand).
 
-T_world_cam2 stays None until pose_semantics / quaternion_order /
-handeye_convention are confirmed in the config; only data inspection is allowed
-before that.
+With the confirmed conventions (pose = T_base_tcp in xyzw, handeye
+wrist_cam2 = T_tcp_cam2 and base_cam1 = T_base_cam1) each packet carries
+
+    T_world_cam2 = inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2
+
+If any convention key is null in the config, T_world_cam2 stays None and only
+data inspection is allowed.
 """
 
 from __future__ import annotations
@@ -25,7 +29,15 @@ from typing import Any, Iterator
 import numpy as np
 from PIL import Image
 
+from ..calibration.handeye import load_handeye_matrices
 from ..calibration.intrinsics import intrinsics_from_matrix, load_intrinsics_matrix
+from ..calibration.transforms import (
+    check_supported_conventions,
+    compose_T_world_cam2,
+    invert_transform,
+    pose7d_to_matrix,
+    validate_transform,
+)
 from .models import CameraFrame, CameraIntrinsics, FramePacket
 
 _FRAME_RE = re.compile(r"frame-(\d{6})_pose\.txt$")
@@ -47,14 +59,37 @@ class OfflineFrameSource:
         cam2_prefix: str = "wrist",
         pose_source: str = "JointStates.txt",
         frame_count_expected: int | None = None,
-        conventions_confirmed: bool = False,
+        pose_semantics: str | None = None,
+        quaternion_order: str | None = None,
+        handeye_convention: str | None = None,
     ) -> None:
         self.root = Path(root)
         if not self.root.is_dir():
             raise FileNotFoundError(f"dataset root not found: {self.root}")
         self.cam1_prefix = cam1_prefix
         self.cam2_prefix = cam2_prefix
-        self.conventions_confirmed = conventions_confirmed
+        self.quaternion_order = quaternion_order
+        self.conventions_confirmed = all(
+            value is not None
+            for value in (pose_semantics, quaternion_order, handeye_convention)
+        )
+
+        self.T_base_cam1: np.ndarray | None = None
+        self.T_tcp_cam2: np.ndarray | None = None
+        self._T_cam1_base: np.ndarray | None = None
+        if self.conventions_confirmed:
+            check_supported_conventions(pose_semantics, quaternion_order, handeye_convention)
+            handeye = load_handeye_matrices(self.root / "handeye" / "handeye_tf.txt")
+            try:
+                self.T_tcp_cam2 = handeye["wrist_cam2"]
+                self.T_base_cam1 = handeye["base_cam1"]
+            except KeyError as exc:
+                raise ValueError(
+                    f"handeye_tf.txt is missing expected label {exc}; found {sorted(handeye)}"
+                ) from exc
+            validate_transform(self.T_tcp_cam2)
+            validate_transform(self.T_base_cam1)
+            self._T_cam1_base = invert_transform(self.T_base_cam1)
 
         self.indices = self._discover_indices()
         if frame_count_expected is not None and len(self.indices) != frame_count_expected:
@@ -77,17 +112,15 @@ class OfflineFrameSource:
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "OfflineFrameSource":
         ds = config["dataset"]
-        confirmed = all(
-            ds.get(key) is not None
-            for key in ("pose_semantics", "quaternion_order", "handeye_convention")
-        )
         return cls(
             root=ds["root"],
             cam1_prefix=ds.get("cam1_prefix", "head"),
             cam2_prefix=ds.get("cam2_prefix", "wrist"),
             pose_source=ds.get("pose_source", "JointStates.txt"),
             frame_count_expected=ds.get("frame_count_expected"),
-            conventions_confirmed=confirmed,
+            pose_semantics=ds.get("pose_semantics"),
+            quaternion_order=ds.get("quaternion_order"),
+            handeye_convention=ds.get("handeye_convention"),
         )
 
     # -- discovery / validation ------------------------------------------------
@@ -179,10 +212,12 @@ class OfflineFrameSource:
         )
 
         T_world_cam2 = None
+        T_base_tcp = None
         if self.conventions_confirmed:
-            # Pose composition is implemented in Task 2 once the confirmed
-            # conventions define how raw_pose_7d maps to T_world_cam2.
-            raise NotImplementedError("T_world_cam2 composition lands in Task 2")
+            T_base_tcp = pose7d_to_matrix(raw_pose, self.quaternion_order)
+            T_world_cam2 = compose_T_world_cam2(
+                self.T_base_cam1, T_base_tcp, self.T_tcp_cam2
+            )
 
         return FramePacket(
             index=index,
@@ -191,6 +226,7 @@ class OfflineFrameSource:
             cam2=cam2,
             T_world_cam1=np.eye(4, dtype=np.float64),
             T_world_cam2=T_world_cam2,
+            tcp_pose=T_base_tcp,
             raw_pose_7d=raw_pose,
         )
 

@@ -35,15 +35,38 @@ def test_first_packet_contents(source):
     assert np.allclose(packet.T_world_cam1, np.eye(4))
 
 
-def test_conventions_unconfirmed_blocks_world_pose(source):
-    assert source.conventions_confirmed is False
+def test_confirmed_conventions_produce_world_pose(source):
+    assert source.conventions_confirmed is True
     packet = source.read_packet(0)
-    assert packet.T_world_cam2 is None
-    # Raw pose is still carried through for inspection.
+    T = packet.T_world_cam2
+    assert T is not None and T.shape == (4, 4)
+    assert abs(np.linalg.det(T[:3, :3]) - 1.0) < 1e-6
+    assert np.allclose(T[3], [0, 0, 0, 1])
+    # Composition matches the confirmed formula.
+    from object_reconstruction.calibration.transforms import (
+        compose_T_world_cam2,
+        pose7d_to_matrix,
+    )
+
+    expected = compose_T_world_cam2(
+        source.T_base_cam1, pose7d_to_matrix(packet.raw_pose_7d), source.T_tcp_cam2
+    )
+    assert np.allclose(T, expected)
+    # Raw pose is still carried through.
     expected_first_row = np.array(
         [0.19252, -0.202075, 0.262422, 0.799332013, 0.108328487, -0.530382538, 0.260821078]
     )
     assert np.allclose(packet.raw_pose_7d, expected_first_row)
+
+
+def test_unconfirmed_conventions_block_world_pose():
+    config = load_config(REPO_ROOT / "configs" / "offline.yaml")
+    config["dataset"]["root"] = str(REPO_ROOT / "data")
+    config["dataset"]["pose_semantics"] = None
+    blocked = OfflineFrameSource.from_config(config)
+    assert blocked.conventions_confirmed is False
+    packet = blocked.read_packet(0)
+    assert packet.T_world_cam2 is None
 
 
 def test_pose_table_matches_per_frame_files(source):

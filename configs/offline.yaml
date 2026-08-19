@@ -5,10 +5,14 @@ dataset:
   cam2_prefix: "wrist"
   frame_count_expected: 113
   pose_source: "JointStates.txt"
-  # 以下三项必须根据采集端定义填写；null 时数据检查只报告 raw 值并标记阻塞。
-  pose_semantics: null      # 例如 "T_base_tcp"
-  quaternion_order: null    # "xyzw" 或 "wxyz"
-  handeye_convention: null  # handeye_tf.txt 中矩阵的源/目标坐标系定义
+  # 已由采集端确认（2026-08-19）：
+  # 7D pose = x, y, z, qx, qy, qz, qw，表示机械臂 TCP 在 base 系下的位姿。
+  pose_semantics: "T_base_tcp"
+  quaternion_order: "xyzw"
+  # handeye_tf.txt: wrist_cam2 = T_tcp_cam2（末端→RealSense2），
+  #                 base_cam1  = T_base_cam1（机械臂 base→RealSense1）。
+  # T_world_cam2 = inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2，WORLD = cam1(head)。
+  handeye_convention: "wrist_cam2=T_tcp_cam2,base_cam1=T_base_cam1"
 
 world_frame: "head_optical"
 
@@ -17,8 +21,8 @@ devices:
   tsdf: "CPU:0"
 
 depth:
-  # 16-bit PNG 的单位必须由采集端确认；null 时禁止融合。
-  scale: null
+  # 采集端 save_depth 将米 ×1000 存为 uint16 PNG，即毫米。
+  scale: 1000.0
   min_m: 0.15
   max_m: 1.2
 

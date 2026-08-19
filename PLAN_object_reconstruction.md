@@ -516,19 +516,20 @@ wrist: fx=653.2439575195312, fy=652.7537231445312,
        cx=636.3500366210938, cy=358.8265380859375
 ```
 
-以下语义在开始坐标变换前必须由数据采集端确认并写进 config：
+以下语义已由数据采集端确认（2026-08-19），并已写入 `configs/offline.yaml`：
 
 ```text
-pose 7D 的定义：translation + quaternion？
-quaternion 顺序：xyzw 还是 wxyz？
-pose 表示 T_base_tcp 还是其逆？
-handeye 中 wrist_cam/head_cam 的源坐标系、目标坐标系和单位
-depth PNG 的单位及 depth_scale
-RGB 与 depth 是否已经像素对齐
-内参是否对应当前 1280 x 720 对齐后的图像
+pose 7D           = x, y, z, qx, qy, qz, qw（quaternion 顺序 xyzw）
+pose 语义         = T_base_tcp（TCP 在机械臂 base 系下的位姿）
+handeye wrist_cam2 = T_tcp_cam2（末端 → RealSense2）
+handeye base_cam1  = T_base_cam1（机械臂 base → RealSense1）
+depth.scale       = 1000.0（采集端保存时米 ×1000 → uint16 mm）
 ```
 
-文件存在并不等于这些 convention 已经确定。未确认前只允许完成数据检查，禁止融合。
+**实测状态（tools/validate_transforms.py，2026-08-19 重标定 base_cam1 后）**：
+两条验收全部通过——cam2 世界点云跨帧静止一致性 ~0.71（翻转 wrist 手眼后降至
+~0.44）；cam2 与固定 cam1 的跨相机重叠 ~0.34（所有翻转变体仅 0.01–0.02）。
+双相机融合链路已解锁。
 
 ## 5.2 标准化适配层
 
@@ -1631,10 +1632,10 @@ dataset:
   cam2_prefix: "wrist"
   frame_count_expected: 113
   pose_source: "JointStates.txt"
-  # 以下三项必须根据采集端定义填写；null 时数据检查应 fail fast。
-  pose_semantics: null
-  quaternion_order: null
-  handeye_convention: null
+  # 已确认（null 时数据检查 fail fast）。
+  pose_semantics: "T_base_tcp"
+  quaternion_order: "xyzw"
+  handeye_convention: "wrist_cam2=T_tcp_cam2,base_cam1=T_base_cam1"
 
 world_frame: "head_optical"
 
@@ -2076,11 +2077,12 @@ frame dropping
 
 只有同时满足下面条件，才认为离线 MVP 跑通。
 
-- [ ] 可以完整读取离线同步数据。
-- [ ] `pose_semantics`、`quaternion_order`、`handeye_convention` 和 `depth.scale` 均已确认，配置不再 fail fast。
-- [ ] camera1 / camera2 内参正确。
-- [ ] `T_world_cam2` convention 完全明确。
-- [ ] Cam2 运动时，物体 world PCD 基本保持稳定。
+- [x] 可以完整读取离线同步数据。
+- [x] `pose_semantics`、`quaternion_order`、`handeye_convention` 和 `depth.scale` 均已确认，配置不再 fail fast。
+- [x] `base_cam1` 标定修复并通过 validate_transforms 跨相机验收（2026-08-19 重标定后跨相机重叠 0.34）。
+- [x] camera1 / camera2 内参正确。
+- [x] `T_world_cam2` convention 完全明确。
+- [x] Cam2 运动时，物体 world PCD 基本保持稳定。
 - [ ] SAM 2.1 可以在 RTX 3060 容器中稳定获得物体 A mask。
 - [ ] SAM 2.1 真实 checkpoint smoke test 在目标容器中通过。
 - [ ] mask 可缓存。
