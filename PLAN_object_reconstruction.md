@@ -328,20 +328,27 @@ services:
       context: .
       dockerfile: Dockerfile
     image: mvstreamrefine:cu121
-    gpus: all
     shm_size: "8gb"
     environment:
       SAM2_CHECKPOINT: /models/sam2.1_hiera_tiny.pt
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - ./data:/workspace/data:ro
       - ./checkpoints:/models:ro
       - ./output:/workspace/output
 ```
 
-要求使用支持 `gpus: all` 的 Docker Compose v2。构建主镜像前先独立验证宿主机
-NVIDIA Container Toolkit：
+不要使用服务级 `gpus: all`：部分 Compose schema 会报 `Additional property gpus is not allowed`。
+GPU 通过 NVIDIA Container Toolkit 的 `deploy.resources.reservations.devices` 声明。
+构建主镜像前先独立验证宿主机 NVIDIA Container Toolkit：
 
 ```bash
 docker run --rm --gpus all \
