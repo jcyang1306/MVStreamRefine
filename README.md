@@ -32,6 +32,11 @@ docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
 docker compose build
 docker compose run --rm reconstruction \
   python3 tools/inspect_dataset.py --config configs/offline.yaml
+
+# GPU 通过 compose.yaml 的 deploy.resources.reservations.devices 声明。
+# 若 compose 版本过旧仍报 schema 错误，可退回：
+# docker build -t mvstreamrefine:cu121 .
+# docker run --rm --gpus all --shm-size=8g ... mvstreamrefine:cu121
 ```
 
 SAM 2.1 checkpoint 不入库，放在 `checkpoints/` 并通过只读 volume 挂载为
