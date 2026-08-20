@@ -84,6 +84,22 @@ docker compose run --rm reconstruction \
 `output/debug/tsdf_cam1.ply`（可用 MeshLab / CloudCompare 检查物体形状）。
 点数为 0 或 mask 缓存缺失时以非零退出码失败。帧数可用 `--frames` 调整。
 
+## 双相机增量重建（Task 6–7，需在 CUDA 容器内运行）
+
+完整融合循环（无 ICP）：cam1 低频锚定（前 `cam1.initial_frames` 帧 +
+每 `update_interval_frames` 一帧），cam2 按关键帧准入（位移 > 2cm 或
+旋转 > 5°，且 mask 面积 / 有效深度比过门限）以已知位姿 `T_world_cam2` 积分：
+
+```bash
+docker compose run --rm reconstruction \
+  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml
+```
+
+成功时打印 cam1 积分次数、cam2 关键帧数（及被拒帧数）、总点数与边界盒，
+并保存 `output/pointcloud/object_a.ply`。验收现象：随 cam2 运动，物体模型
+比单视角更完整（侧面/背面补全）；无任何 cam2 关键帧时以非零退出码失败。
+调试可加 `--max-frames N`。
+
 ## 数据语义（已确认，2026-08-19）
 
 - `pose_semantics = T_base_tcp`：7D 位姿为 `x,y,z,qx,qy,qz,qw`
