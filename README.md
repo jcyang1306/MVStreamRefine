@@ -70,6 +70,20 @@ docker compose run --rm reconstruction \
 （mask_area / iou_prev / valid_depth_ratio）以及 `output/masks/previews/`
 叠加图供人工抽检。重建阶段默认读取该缓存，不重复执行 SAM 2.1。
 
+## TSDF cam1 单视角验收（Task 5，需在 CUDA 容器内运行）
+
+依赖 Task 3 的 mask 缓存（`output/masks/`）。cam1（head）固定为 WORLD，
+取前 N 帧（默认 10）以单位位姿积分进 TSDF，导出点云：
+
+```bash
+docker compose run --rm reconstruction \
+  python3 tools/validate_tsdf_cam1.py --config configs/offline.yaml
+```
+
+成功时打印每帧 mask 面积 / 有效深度比、总点数与边界盒，并保存
+`output/debug/tsdf_cam1.ply`（可用 MeshLab / CloudCompare 检查物体形状）。
+点数为 0 或 mask 缓存缺失时以非零退出码失败。帧数可用 `--frames` 调整。
+
 ## 数据语义（已确认，2026-08-19）
 
 - `pose_semantics = T_base_tcp`：7D 位姿为 `x,y,z,qx,qy,qz,qw`
