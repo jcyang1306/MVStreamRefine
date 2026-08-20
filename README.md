@@ -42,6 +42,22 @@ docker compose run --rm reconstruction \
 SAM 2.1 checkpoint 不入库，放在 `checkpoints/` 并通过只读 volume 挂载为
 `/models/sam2.1_hiera_tiny.pt`。
 
+## Mask 预计算（Task 3，需在 CUDA 容器内运行）
+
+首帧手工 box 提示物体 A（像素坐标 xyxy，可对照
+`output/debug/preview_000000.png` 选取），head/wrist 两路顺序执行：
+
+```bash
+docker compose run --rm reconstruction \
+  python3 tools/precompute_masks.py --config configs/offline.yaml \
+    --cam1-box X1 Y1 X2 Y2 \
+    --cam2-box X1 Y1 X2 Y2
+```
+
+输出：`output/masks/cam{1,2}/*.png`（0/255）、`mask_metadata.jsonl`
+（mask_area / iou_prev / valid_depth_ratio）以及 `output/masks/previews/`
+叠加图供人工抽检。重建阶段默认读取该缓存，不重复执行 SAM 2.1。
+
 ## 数据语义（已确认，2026-08-19）
 
 - `pose_semantics = T_base_tcp`：7D 位姿为 `x,y,z,qx,qy,qz,qw`
