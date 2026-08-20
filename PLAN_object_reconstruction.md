@@ -2003,6 +2003,14 @@ logging
 
 完成离线 MVP。
 
+**状态（2026-08-20）**：代码已实现，待在目标容器（X11）实测后勾选验收项。
+`visualization/live_viewer.py`（点云 + cam1/cam2 坐标系 + cam2 轨迹，热键
+SPACE/S/M/Q，每 `visualization.update_every_keyframes` 个关键帧刷新一次）；
+`TSDFVolume.save_mesh` / `save_point_cloud` / `block_count`；
+`utils/logging.py`（控制台 + output/logs/run_*.log）；pipeline 增量快照
+`model_kf_XXX.ply` 与逐关键帧 debug 记录（output/debug/fusion_debug.jsonl，
+含 §15 要求的全部字段）。无显示环境用 `--no-viewer`。
+
 ---
 
 ## Task 9
@@ -2083,18 +2091,18 @@ frame dropping
 - [x] camera1 / camera2 内参正确。
 - [x] `T_world_cam2` convention 完全明确。
 - [x] Cam2 运动时，物体 world PCD 基本保持稳定。
-- [ ] SAM 2.1 可以在 RTX 3060 容器中稳定获得物体 A mask。
-- [ ] SAM 2.1 真实 checkpoint smoke test 在目标容器中通过。
-- [ ] mask 可缓存。
-- [ ] masked RGB-D 正确。
-- [ ] Open3D TSDF 可以逐 keyframe integrate。
-- [ ] Open3D `CPU:0` VoxelBlockGrid smoke test 在目标容器中通过。
-- [ ] cam1 + cam2 可以融合。
-- [ ] Cam2 移动时模型逐渐完整。
+- [x] SAM 2.1 可以在 RTX 3060 容器中稳定获得物体 A mask（2026-08-20 实测，双流 113 帧 mask 人工确认正确）。
+- [x] SAM 2.1 真实 checkpoint smoke test 在目标容器中通过（sam2.1_hiera_tiny.pt）。
+- [x] mask 可缓存（output/masks/cam{1,2}/，precompute_masks 一次性生成）。
+- [x] masked RGB-D 正确（validate_tsdf_cam1 单视角表面人工确认为物体 A）。
+- [x] Open3D TSDF 可以逐 keyframe integrate。
+- [x] Open3D `CPU:0` VoxelBlockGrid smoke test 在目标容器中通过。
+- [x] cam1 + cam2 可以融合（2026-08-20 实测：13 次 cam1 积分 + 9 个 cam2 关键帧，6862 点；跨视角残余错位待 Task 9 ICP 收敛）。
+- [x] Cam2 移动时模型逐渐完整（比 cam1 单视角多出一块，颜色轮廓与 mask 对应）。
 - [ ] 可以实时/准实时显示当前 point cloud。
-- [ ] 可以保存 `.ply` point cloud。
+- [x] 可以保存 `.ply` point cloud（output/pointcloud/object_a.ply + 增量快照 model_kf_XXX.ply）。
 - [ ] 可以保存 `.ply` mesh。
-- [ ] 所有参数均从 YAML 配置读取。
+- [x] 所有参数均从 YAML 配置读取。
 - [ ] ICP 可以通过 config 完全关闭。
 - [ ] 不使用 ICP 时 pipeline 仍可正常工作。
 

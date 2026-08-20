@@ -132,10 +132,12 @@ def small_params(**overrides):
 def test_integrate_plane_and_extract_point_cloud(tmp_path):
     pytest.importorskip("open3d")
     volume = TSDFVolume(small_params())
+    assert volume.block_count() == 0
     rgb, depth, intrinsics = make_plane_frame(depth_mm=500)
     for _ in range(3):
         volume.integrate(rgb, depth, intrinsics, T_world_cam=np.eye(4))
     assert volume.integration_count == 3
+    assert volume.block_count() > 0
 
     points = volume.extract_point_cloud().point.positions.numpy()
     assert len(points) > 0
@@ -144,6 +146,9 @@ def test_integrate_plane_and_extract_point_cloud(tmp_path):
 
     saved = volume.save(tmp_path / "plane.ply")
     assert saved.is_file() and saved.stat().st_size > 0
+    # Task 8: an explicit mesh writer that allows the .ply extension for meshes.
+    mesh_saved = volume.save_mesh(tmp_path / "plane_mesh.ply")
+    assert mesh_saved.is_file() and mesh_saved.stat().st_size > 0
 
 
 def test_integrate_rejects_bad_inputs():

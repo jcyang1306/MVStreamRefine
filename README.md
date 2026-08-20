@@ -84,21 +84,42 @@ docker compose run --rm reconstruction \
 `output/debug/tsdf_cam1.ply`（可用 MeshLab / CloudCompare 检查物体形状）。
 点数为 0 或 mask 缓存缺失时以非零退出码失败。帧数可用 `--frames` 调整。
 
-## 双相机增量重建（Task 6–7，需在 CUDA 容器内运行）
+## 双相机增量重建（Task 6–8，需在 CUDA 容器内运行）
 
 完整融合循环（无 ICP）：cam1 低频锚定（前 `cam1.initial_frames` 帧 +
 每 `update_interval_frames` 一帧），cam2 按关键帧准入（位移 > 2cm 或
-旋转 > 5°，且 mask 面积 / 有效深度比过门限）以已知位姿 `T_world_cam2` 积分：
+旋转 > 5°，且 mask 面积 / 有效深度比过门限）以已知位姿 `T_world_cam2` 积分。
+无显示环境时加 `--no-viewer`：
 
 ```bash
 docker compose run --rm reconstruction \
-  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml
+  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml --no-viewer
 ```
 
-成功时打印 cam1 积分次数、cam2 关键帧数（及被拒帧数）、总点数与边界盒，
-并保存 `output/pointcloud/object_a.ply`。验收现象：随 cam2 运动，物体模型
-比单视角更完整（侧面/背面补全）；无任何 cam2 关键帧时以非零退出码失败。
-调试可加 `--max-frames N`。
+带实时可视化（需 X11，同 mask 交互选框的用法）：
+
+```bash
+xhost +local:root   # 或 +si:localuser:root
+docker compose run --rm -e DISPLAY="$DISPLAY" -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  reconstruction python3 tools/run_offline_reconstruction.py --config configs/offline.yaml
+```
+
+查看器每 `visualization.update_every_keyframes` 个关键帧刷新一次，显示
+TSDF 点云、cam1（世界）坐标系、cam2 当前坐标系与轨迹；热键：SPACE 暂停、
+S 保存点云、M 保存 mesh、Q 提前退出（退出时仍保存当前结果）。
+
+输出（Task 8）：
+
+- `output/pointcloud/object_a.ply`：最终点云
+- `output/mesh/object_a_mesh.ply`：最终三角 mesh
+- `output/pointcloud/model_kf_XXX.ply`：增量快照（`output.save_keyframes`，
+  用于人工确认模型随关键帧增加逐渐完整）
+- `output/debug/fusion_debug.jsonl`：逐关键帧 debug 记录（frame id、
+  keyframe id、`T_world_cam2`、mask 面积、有效深度比、TSDF block 数、点数）
+- `output/logs/run_*.log`：运行日志
+
+验收现象：随 cam2 运动，物体模型比单视角更完整（侧面/背面补全）；
+无任何 cam2 关键帧时以非零退出码失败。调试可加 `--max-frames N`。
 
 ## 数据语义（已确认，2026-08-19）
 

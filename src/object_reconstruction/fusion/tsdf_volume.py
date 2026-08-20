@@ -226,22 +226,38 @@ class TSDFVolume:
             weight_threshold=self.params.weight_threshold
         )
 
+    def block_count(self) -> int:
+        """Number of allocated voxel blocks (debug metric, PLAN section 15)."""
+        if self.integration_count == 0:
+            return 0
+        return int(self._grid.hashmap().size())
+
     def save(self, path: str | Path) -> Path:
         """Save by extension: point cloud for .ply/.pcd, mesh for .obj/.stl/.glb."""
         path = Path(path)
         suffix = path.suffix.lower()
-        path.parent.mkdir(parents=True, exist_ok=True)
         if suffix in _POINT_CLOUD_SUFFIXES:
-            geometry = self.extract_point_cloud().to_legacy()
-            written = self._o3d.io.write_point_cloud(str(path), geometry)
-        elif suffix in _MESH_SUFFIXES:
-            geometry = self.extract_mesh().to_legacy()
-            written = self._o3d.io.write_triangle_mesh(str(path), geometry)
-        else:
-            raise ValueError(
-                f"unsupported save extension {suffix!r}; point cloud: "
-                f"{_POINT_CLOUD_SUFFIXES}, mesh: {_MESH_SUFFIXES}"
-            )
-        if not written:
+            return self.save_point_cloud(path)
+        if suffix in _MESH_SUFFIXES:
+            return self.save_mesh(path)
+        raise ValueError(
+            f"unsupported save extension {suffix!r}; point cloud: "
+            f"{_POINT_CLOUD_SUFFIXES}, mesh: {_MESH_SUFFIXES}"
+        )
+
+    def save_point_cloud(self, path: str | Path) -> Path:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        geometry = self.extract_point_cloud().to_legacy()
+        if not self._o3d.io.write_point_cloud(str(path), geometry):
+            raise RuntimeError(f"open3d failed to write {path}")
+        return path
+
+    def save_mesh(self, path: str | Path) -> Path:
+        """Write the triangle mesh regardless of extension (e.g. mesh .ply)."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        geometry = self.extract_mesh().to_legacy()
+        if not self._o3d.io.write_triangle_mesh(str(path), geometry):
             raise RuntimeError(f"open3d failed to write {path}")
         return path
