@@ -44,14 +44,26 @@ SAM 2.1 checkpoint 不入库，放在 `checkpoints/` 并通过只读 volume 挂�
 
 ## Mask 预计算（Task 3，需在 CUDA 容器内运行）
 
-首帧手工 box 提示物体 A（像素坐标 xyxy，可对照
-`output/debug/preview_000000.png` 选取），head/wrist 两路顺序执行：
+不传 `--cam1-box` / `--cam2-box` 时，工具会依次显示 head 和 wrist
+首帧。鼠标拖框后按 Enter/Space 确认（按 C 取消）。Docker 需要传入宿主机
+X11 显示：
+
+```bash
+xhost +si:localuser:root
+docker compose run --rm \
+  -e DISPLAY="$DISPLAY" \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  reconstruction \
+  python3 tools/precompute_masks.py --config configs/offline.yaml
+xhost -si:localuser:root
+```
+
+无图形界面或自动化运行时仍可显式传入像素坐标 `xyxy`，此时不会打开窗口：
 
 ```bash
 docker compose run --rm reconstruction \
   python3 tools/precompute_masks.py --config configs/offline.yaml \
-    --cam1-box X1 Y1 X2 Y2 \
-    --cam2-box X1 Y1 X2 Y2
+  --cam1-box X1 Y1 X2 Y2 --cam2-box X1 Y1 X2 Y2
 ```
 
 输出：`output/masks/cam{1,2}/*.png`（0/255）、`mask_metadata.jsonl`

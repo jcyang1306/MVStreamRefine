@@ -10,9 +10,11 @@ Video tracking has no quality scores, so per-frame metadata records mask area,
 IoU with the previous frame and valid-depth ratio; a few RGB overlay previews
 are saved for human spot checks.
 
-Requires torch + sam2-inference + checkpoint (run inside the CUDA container):
+Requires torch + sam2-inference + checkpoint (run inside the CUDA container).
+If a camera box is omitted, its first RGB frame is shown for interactive ROI
+selection (drag the rectangle, then press Enter/Space; press C to cancel):
     python tools/precompute_masks.py --config configs/offline.yaml \
-        --cam1-box X1 Y1 X2 Y2 --cam2-box X1 Y1 X2 Y2
+        [--cam1-box X1 Y1 X2 Y2] [--cam2-box X1 Y1 X2 Y2]
 """
 
 from __future__ import annotations
@@ -37,6 +39,72 @@ from object_reconstruction.segmentation.sam2_segmenter import (
 from object_reconstruction.utils.config import load_config
 
 CAM_PREFIX_ATTR = {1: "cam1_prefix", 2: "cam2_prefix"}
+
+
+def select_interactive_box(
+    image_path: str | Path, camera_name: str
+) -> tuple[float, float, float, float]:
+    """Display an image and let the user select an xyxy rectangle with OpenCV."""
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError(
+            "interactive box selection requires opencv-python with GUI support; "
+            "rebuild the project image after updating requirements.txt"
+        ) from exc
+
+    image_path = Path(image_path)
+    image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(f"could not read first-frame RGB image: {image_path}")
+
+    window_name = f"Select object A - {camera_name}"
+    print(
+        f"[{camera_name}] select object A in {image_path}: "
+        "drag ROI, press Enter/Space to confirm, or C to cancel"
+    )
+    try:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        x, y, width, height = cv2.selectROI(
+            window_name, image, showCrosshair=True, fromCenter=False
+        )
+    except cv2.error as exc:
+        raise RuntimeError(
+            "could not open the ROI selection window. When running in Docker, "
+            "pass DISPLAY and mount /tmp/.X11-unix (see README.md)."
+        ) from exc
+    finally:
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:
+            # Headless OpenCV may reject both window creation and cleanup;
+            # preserve the actionable error raised above.
+            pass
+
+    if width <= 0 or height <= 0:
+        raise RuntimeError(f"{camera_name} ROI selection was cancelled or empty")
+
+    box = (float(x), float(y), float(x + width), float(y + height))
+    print(f"[{camera_name}] selected xyxy box: {' '.join(f'{v:g}' for v in box)}")
+    return box
+
+
+def resolve_boxes(
+    source: OfflineFrameSource,
+    cam1_box: list[float] | None,
+    cam2_box: list[float] | None,
+) -> dict[int, tuple[float, float, float, float]]:
+    """Use CLI boxes when present; interactively select every missing box."""
+    boxes: dict[int, tuple[float, float, float, float]] = {}
+    first_index = source.indices[0]
+    for cam, provided in ((1, cam1_box), (2, cam2_box)):
+        prefix = getattr(source, CAM_PREFIX_ATTR[cam])
+        if provided is None:
+            image_path = source.root / f"frame-{first_index:06d}_{prefix}_color.jpg"
+            boxes[cam] = select_interactive_box(image_path, f"cam{cam} ({prefix})")
+        else:
+            boxes[cam] = tuple(provided)
+    return boxes
 
 
 def load_depth(source: OfflineFrameSource, prefix: str, index: int) -> np.ndarray:
@@ -134,14 +202,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--cam1-box", type=float, nargs=4, metavar=("X1", "Y1", "X2", "Y2"),
-                        help="first-frame xyxy box for object A in the head stream")
+                        help="first-frame xyxy box for head; omitted = interactive selection")
     parser.add_argument("--cam2-box", type=float, nargs=4, metavar=("X1", "Y1", "X2", "Y2"),
-                        help="first-frame xyxy box for object A in the wrist stream")
+                        help="first-frame xyxy box for wrist; omitted = interactive selection")
     parser.add_argument("--preview-every", type=int, default=20)
     args = parser.parse_args()
-
-    if args.cam1_box is None and args.cam2_box is None:
-        parser.error("provide --cam1-box and/or --cam2-box (manual first-frame prompt)")
 
     config = load_config(args.config)
     if not config["sam2"].get("enabled", True):
@@ -149,14 +214,13 @@ def main() -> int:
         return 1
     source = OfflineFrameSource.from_config(config)
     cache = MaskCache(Path(config["output"]["root"]) / "masks")
+    boxes = resolve_boxes(source, args.cam1_box, args.cam2_box)
 
     all_records: list[dict] = []
     all_ok = True
     # PLAN section 8: run the two streams sequentially on RTX 3060.
-    for cam, box in ((1, args.cam1_box), (2, args.cam2_box)):
-        if box is None:
-            continue
-        records = run_stream(cam, tuple(box), config, source, cache, args.preview_every)
+    for cam, box in boxes.items():
+        records = run_stream(cam, box, config, source, cache, args.preview_every)
         all_records.extend(records)
         all_ok &= summarize(cam, records, config["mask"]["min_area_px"], len(source))
 
