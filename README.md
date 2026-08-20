@@ -121,6 +121,29 @@ S 保存点云、M 保存 mesh、Q 提前退出（退出时仍保存当前结果
 验收现象：随 cam2 运动，物体模型比单视角更完整（侧面/背面补全）；
 无任何 cam2 关键帧时以非零退出码失败。调试可加 `--max-frames N`。
 
+## ICP 精配准与 A/B 对比（Task 9）
+
+每个 cam2 关键帧在积分**之前**，用 point-to-plane ICP 把 robot pose 与当前
+已融合模型（WORLD 系）配准微调；安全门限（`icp.min_fitness` /
+`max_rmse_m` / `max_translation_correction_m` / `max_rotation_correction_deg`）
+任一不过即回退 robot pose——机器人位姿是强先验，ICP 只做局部微调。
+
+A/B 对比（PLAN §18）：
+
+```bash
+docker compose run --rm reconstruction \
+  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml \
+  --no-viewer --icp false   # -> output/run_robot_pose/
+docker compose run --rm reconstruction \
+  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml \
+  --no-viewer --icp true    # -> output/run_icp_pose/
+```
+
+两次运行各自输出点云/mesh/debug jsonl（含每关键帧 fitness、rmse、
+Δtranslation、Δrotation 与是否接受）。重点对比：表面厚度、双层表面、
+边缘锐度、cam1/cam2 重叠区域。确认 ICP 确实改善后，再把
+`configs/offline.yaml` 的 `icp.enabled` 改为 `true` 作为默认。
+
 ## 数据语义（已确认，2026-08-19）
 
 - `pose_semantics = T_base_tcp`：7D 位姿为 `x,y,z,qx,qy,qz,qw`

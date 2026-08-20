@@ -64,6 +64,8 @@ tsdf:
   depth_max_m: 1.2
   weight_threshold: 3.0
 
+# Task 9：逐 cam2 关键帧 point-to-plane ICP 精配准（robot pose 为初值与回退）。
+# 默认关闭；先用 --icp true / --icp false 做 A/B，确认改善后再改 enabled。
 icp:
   enabled: false
   max_correspondence_distance_m: 0.01
@@ -71,6 +73,8 @@ icp:
   max_rmse_m: 0.008
   max_translation_correction_m: 0.02
   max_rotation_correction_deg: 5.0
+  voxel_downsample_m: 0.004
+  max_iterations: 30
 
 visualization:
   enabled: true

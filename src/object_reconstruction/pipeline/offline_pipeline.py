@@ -6,7 +6,7 @@ Per frame packet:
     ``cam1.update_interval_frames``, capped at ``cam1.max_integrations``.
     cam2 (wrist, eye-in-hand): integrated only on keyframes accepted by
     KeyframeSelector (pose increment + mask quality gates) at known poses
-    T_world_cam2. No ICP in this version.
+    T_world_cam2.
 
 Task 8 additions: every ``visualization.update_every_keyframes`` accepted
 keyframes the point cloud is extracted once (never per input frame) to
@@ -14,8 +14,13 @@ refresh the optional viewer and, when ``output.save_keyframes`` is on, save
 an incremental snapshot model_kf_XXX.ply. Per-keyframe debug records (PLAN
 section 15) are collected in ``stats["debug_records"]``.
 
-The TSDF volume, selector and viewer are injected so the loop itself stays
-free of open3d imports and unit-testable with fakes.
+Task 9: when an ICP refiner is injected, each accepted cam2 keyframe is
+refined against the model extracted BEFORE integrating that frame (never
+register a frame against itself), with the robot pose as the initial guess
+and as the fallback whenever the refiner's safety gates reject the result.
+
+The TSDF volume, selector, viewer and refiner are injected so the loop
+itself stays free of open3d imports and unit-testable with fakes.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ import numpy as np
 
 from ..data.offline_source import OfflineFrameSource
 from ..fusion.keyframe_selector import KeyframeSelector
+from ..geometry.pointcloud import depth_to_pointcloud
 from ..geometry.rgbd import preprocess_object_rgbd
 from ..segmentation.mask_cache import MaskCache
 
@@ -45,6 +51,13 @@ def _point_count(point_cloud: Any) -> int | None:
         return None
 
 
+def _point_positions(point_cloud: Any) -> np.ndarray:
+    try:
+        return point_cloud.point.positions.numpy()  # tensor point cloud
+    except AttributeError:
+        return np.asarray(point_cloud.points)  # legacy point cloud
+
+
 class OfflinePipeline:
     def __init__(
         self,
@@ -52,11 +65,14 @@ class OfflinePipeline:
         keyframe_selector: KeyframeSelector,
         config: dict[str, Any],
         viewer: Any = None,
+        icp_refiner: Any = None,
     ) -> None:
         self.tsdf = tsdf
         self.selector = keyframe_selector
         self.config = config
         self.viewer = viewer
+        self.icp_refiner = icp_refiner
+        self.depth_scale = float(config["depth"]["scale"])
         cam1 = config.get("cam1", {})
         self.cam1_initial_frames = int(cam1.get("initial_frames", 10))
         self.cam1_update_interval = int(cam1.get("update_interval_frames", 30))
@@ -85,6 +101,8 @@ class OfflinePipeline:
             "debug_records": [],
             "snapshots": [],
             "quit_requested": False,
+            "icp_accepted": 0,
+            "icp_fallback": 0,
         }
         last_cam1_position: int | None = None
         keyframe_log = logger.info if verbose else logger.debug
@@ -125,19 +143,24 @@ class OfflinePipeline:
             if self.selector.should_add(
                 packet.T_world_cam2, rgbd2.mask_area_px, rgbd2.valid_depth_ratio
             ):
+                # ICP must run BEFORE this frame is integrated (PLAN section 16).
+                T_used, icp_info = self._refine_pose(packet, rgbd2, stats)
                 self.tsdf.integrate(
                     rgbd2.rgb, rgbd2.depth, packet.cam2.intrinsics,
-                    T_world_cam=packet.T_world_cam2,
+                    T_world_cam=T_used,
                 )
                 stats["cam2_keyframes"] += 1
                 stats["keyframe_indices"].append(packet.index)
                 keyframe_log(
                     "[frame %3d] cam2 keyframe #%d  mask_area=%d  "
-                    "valid_depth_ratio=%.3f",
+                    "valid_depth_ratio=%.3f%s",
                     packet.index, stats["cam2_keyframes"],
                     rgbd2.mask_area_px, rgbd2.valid_depth_ratio,
+                    self._format_icp(icp_info),
                 )
                 record = self._make_debug_record(packet, rgbd2, stats)
+                record["T_world_cam2_used"] = np.asarray(T_used).tolist()
+                record["icp"] = icp_info
                 stats["debug_records"].append(record)
                 if not self._refresh(packet, stats, record):
                     stats["quit_requested"] = True
@@ -149,6 +172,56 @@ class OfflinePipeline:
         if self.viewer is not None:
             self.viewer.close()
         return stats
+
+    def _refine_pose(
+        self, packet: Any, rgbd2: Any, stats: dict[str, Any]
+    ) -> tuple[np.ndarray, dict[str, Any] | None]:
+        """ICP refinement of the robot pose (Task 9); robot pose is the fallback."""
+        T_robot = np.asarray(packet.T_world_cam2, dtype=np.float64)
+        if self.icp_refiner is None:
+            return T_robot, None
+
+        try:
+            model = self.tsdf.extract_point_cloud()
+        except RuntimeError:
+            return T_robot, {"skipped": "model is still empty"}
+        model_points = _point_positions(model)
+
+        # rgbd2.depth is already masked and range-filtered by preprocessing.
+        source_points, _ = depth_to_pointcloud(
+            rgbd2.depth, packet.cam2.intrinsics, self.depth_scale
+        )
+        result = self.icp_refiner.refine(source_points, model_points, T_robot)
+        info = {
+            "accepted": bool(result.success),
+            "fitness": float(result.fitness),
+            "inlier_rmse": float(result.inlier_rmse),
+            "translation_correction_m": float(result.translation_correction_m),
+            "rotation_correction_deg": float(result.rotation_correction_deg),
+            "reason": result.reason,
+        }
+        stats["icp_accepted" if result.success else "icp_fallback"] += 1
+        return np.asarray(result.T_world_cam_refined, dtype=np.float64), info
+
+    @staticmethod
+    def _format_icp(icp_info: dict[str, Any] | None) -> str:
+        if icp_info is None:
+            return ""
+        if "skipped" in icp_info:
+            return f"  icp=skipped ({icp_info['skipped']})"
+        if icp_info["accepted"]:
+            return (
+                f"  icp=accepted dt={icp_info['translation_correction_m'] * 1000:.1f}mm "
+                f"dr={icp_info['rotation_correction_deg']:.2f}deg "
+                f"fitness={icp_info['fitness']:.2f}"
+            )
+        return (
+            f"  icp=fallback ({icp_info['reason']}; "
+            f"fitness={icp_info['fitness']:.2f} "
+            f"rmse={icp_info['inlier_rmse'] * 1000:.1f}mm "
+            f"dt={icp_info['translation_correction_m'] * 1000:.1f}mm "
+            f"dr={icp_info['rotation_correction_deg']:.2f}deg)"
+        )
 
     def _make_debug_record(
         self, packet: Any, rgbd2: Any, stats: dict[str, Any]

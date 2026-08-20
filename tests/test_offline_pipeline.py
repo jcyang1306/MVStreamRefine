@@ -8,6 +8,7 @@ import pytest
 from object_reconstruction.data.offline_source import OfflineFrameSource
 from object_reconstruction.fusion.keyframe_selector import KeyframeSelector
 from object_reconstruction.pipeline.offline_pipeline import OfflinePipeline
+from object_reconstruction.registration.icp_refiner import ICPResult
 from object_reconstruction.segmentation.mask_cache import MaskCache
 from object_reconstruction.utils.config import load_config
 
@@ -40,6 +41,34 @@ class FakeTSDF:
 
     def block_count(self):
         return len(self.calls) * 7
+
+
+class FakeRefiner:
+    """Applies a fixed +1mm x-offset when accepting; robot pose otherwise."""
+
+    OFFSET = np.array([0.001, 0.0, 0.0])
+
+    def __init__(self, accept=True):
+        self.accept = accept
+        self.calls = []
+
+    def refine(self, source_points, model_points, T_init):
+        self.calls.append((np.asarray(source_points), np.asarray(model_points)))
+        T_init = np.asarray(T_init, dtype=np.float64)
+        if not self.accept:
+            return ICPResult(
+                success=False, T_world_cam_refined=T_init.copy(),
+                fitness=0.1, inlier_rmse=0.02,
+                translation_correction_m=0.0, rotation_correction_deg=0.0,
+                reason="safety gates rejected the correction",
+            )
+        T_refined = T_init.copy()
+        T_refined[:3, 3] += self.OFFSET
+        return ICPResult(
+            success=True, T_world_cam_refined=T_refined,
+            fitness=0.9, inlier_rmse=0.002,
+            translation_correction_m=0.001, rotation_correction_deg=0.0,
+        )
 
 
 class FakeViewer:
@@ -161,6 +190,61 @@ def test_viewer_quit_stops_early(config, source, mask_cache):
     assert stats["cam2_keyframes"] == 1
     assert stats["frames_processed"] < FRAMES or stats["cam2_rejected"] == 0
     assert viewer.closed
+
+
+def test_icp_refined_pose_used_for_integration(config, source, mask_cache):
+    """Task 9: accepted ICP corrections shift the cam2 integration pose."""
+    tsdf = FakeTSDF()
+    refiner = FakeRefiner(accept=True)
+    pipeline = OfflinePipeline(tsdf, KeyframeSelector.from_config(config), config,
+                               icp_refiner=refiner)
+
+    stats = pipeline.run(source, mask_cache, max_frames=FRAMES, verbose=False)
+
+    kf = stats["cam2_keyframes"]
+    assert kf >= 1
+    assert stats["icp_accepted"] == kf
+    assert stats["icp_fallback"] == 0
+    assert len(refiner.calls) == kf
+    # Refiner receives a camera-frame object cloud and the pre-frame model.
+    source_points, model_points = refiner.calls[0]
+    assert source_points.ndim == 2 and source_points.shape[1] == 3
+    assert len(source_points) > 0
+    # cam2 integrations carry the +1mm refined translation vs the robot pose.
+    moving_calls = [T for T in tsdf.calls if not np.allclose(T, np.eye(4))]
+    robot_poses = [np.asarray(source.read_packet(0).T_world_cam2)]
+    np.testing.assert_allclose(
+        moving_calls[0][:3, 3], robot_poses[0][:3, 3] + FakeRefiner.OFFSET
+    )
+    record = stats["debug_records"][0]
+    assert record["icp"]["accepted"] is True
+    assert record["T_world_cam2_used"] != record["T_world_cam2"]
+
+
+def test_icp_fallback_keeps_robot_pose(config, source, mask_cache):
+    tsdf = FakeTSDF()
+    refiner = FakeRefiner(accept=False)
+    pipeline = OfflinePipeline(tsdf, KeyframeSelector.from_config(config), config,
+                               icp_refiner=refiner)
+
+    stats = pipeline.run(source, mask_cache, max_frames=FRAMES, verbose=False)
+
+    kf = stats["cam2_keyframes"]
+    assert kf >= 1
+    assert stats["icp_fallback"] == kf
+    assert stats["icp_accepted"] == 0
+    record = stats["debug_records"][0]
+    assert record["icp"]["accepted"] is False
+    assert record["icp"]["reason"]
+    assert record["T_world_cam2_used"] == record["T_world_cam2"]
+
+
+def test_no_refiner_means_no_icp_stats(config, source, mask_cache):
+    stats = OfflinePipeline(
+        FakeTSDF(), KeyframeSelector.from_config(config), config
+    ).run(source, mask_cache, max_frames=FRAMES, verbose=False)
+    assert stats["icp_accepted"] == 0 and stats["icp_fallback"] == 0
+    assert all(r["icp"] is None for r in stats["debug_records"])
 
 
 def test_missing_masks_skip_frames(config, source, tmp_path):

@@ -1,8 +1,10 @@
-"""Tasks 6-8 acceptance: dual-camera incremental reconstruction, no ICP.
+"""Tasks 6-9 acceptance: dual-camera incremental reconstruction.
 
 Runs the OfflinePipeline over the full sequence: cam1 (WORLD anchor) at low
-frequency plus cam2 keyframes at known poses T_world_cam2, all fused into one
-TSDF volume. Exports:
+frequency plus cam2 keyframes at poses from robot kinematics, optionally
+refined per keyframe by point-to-plane ICP with safety fallback (Task 9).
+A/B comparison (PLAN section 18): pass --icp true / --icp false to write
+results into <output.root>/run_icp_pose/ or run_robot_pose/. Exports:
     <output.root>/pointcloud/object_a.ply        final point cloud
     <output.root>/mesh/object_a_mesh.ply         final triangle mesh
     <output.root>/pointcloud/model_kf_XXX.ply    incremental snapshots
@@ -69,15 +71,28 @@ def main() -> int:
                              "<output.root>/pointcloud/object_a.ply")
     parser.add_argument("--no-viewer", action="store_true",
                         help="disable the live viewer (headless run)")
+    parser.add_argument("--icp", choices=["true", "false"], default=None,
+                        help="override icp.enabled; when given, results go to "
+                             "<output.root>/run_icp_pose/ or run_robot_pose/ "
+                             "for A/B comparison (PLAN section 18)")
     args = parser.parse_args()
 
     config = load_config(args.config)
-    output_root = Path(config["output"]["root"])
+    base_root = Path(config["output"]["root"])
+    icp_enabled = bool(config.get("icp", {}).get("enabled", False))
+    if args.icp is not None:
+        icp_enabled = args.icp == "true"
+        # A/B mode: results are separated per pose source; the mask cache and
+        # SAM staging stay under the base root and are shared by both runs.
+        output_root = base_root / ("run_icp_pose" if icp_enabled else "run_robot_pose")
+        config["output"]["root"] = str(output_root)
+    else:
+        output_root = base_root
     log_path = setup_logging(output_root)
     logger.info("log file: %s", log_path)
 
     source = OfflineFrameSource.from_config(config)
-    cache = MaskCache(output_root / "masks")
+    cache = MaskCache(base_root / "masks")
     if not cache.frames(1) or not cache.frames(2):
         logger.error("mask cache incomplete under %s (need cam1/ and cam2/); "
                      "run tools/precompute_masks.py first", cache.root)
@@ -86,7 +101,12 @@ def main() -> int:
     tsdf = TSDFVolume.from_config(config)
     selector = KeyframeSelector.from_config(config)
     viewer = build_viewer(config, tsdf, output_root, args.no_viewer)
-    pipeline = OfflinePipeline(tsdf, selector, config, viewer=viewer)
+    refiner = None
+    if icp_enabled:
+        from object_reconstruction.registration.icp_refiner import ICPRefiner
+        refiner = ICPRefiner.from_config(config)
+    pipeline = OfflinePipeline(tsdf, selector, config, viewer=viewer,
+                               icp_refiner=refiner)
     logger.info("tsdf: device=%s voxel_size_m=%s",
                 tsdf.params.device, tsdf.params.voxel_size_m)
     logger.info("keyframe: translation_m=%s rotation_deg=%s min_mask_area_px=%s "
@@ -94,6 +114,15 @@ def main() -> int:
                 selector.translation_m, selector.rotation_deg,
                 selector.min_mask_area_px, selector.min_valid_depth_ratio)
     logger.info("viewer: %s", "on" if viewer is not None else "off")
+    if refiner is not None:
+        logger.info("icp: on  max_corr=%.3fm min_fitness=%.2f max_rmse=%.3fm "
+                    "max_dt=%.3fm max_dr=%.1fdeg",
+                    refiner.params.max_correspondence_distance_m,
+                    refiner.params.min_fitness, refiner.params.max_rmse_m,
+                    refiner.params.max_translation_correction_m,
+                    refiner.params.max_rotation_correction_deg)
+    else:
+        logger.info("icp: off (robot pose only)")
 
     stats = pipeline.run(source, cache, max_frames=args.max_frames)
 
@@ -101,6 +130,20 @@ def main() -> int:
     logger.info("cam1 integrations: %d", stats["cam1_integrations"])
     logger.info("cam2 keyframes:    %d (rejected %d)",
                 stats["cam2_keyframes"], stats["cam2_rejected"])
+    if refiner is not None:
+        logger.info("icp: accepted %d / fallback %d",
+                    stats["icp_accepted"], stats["icp_fallback"])
+        icp_runs = [r["icp"] for r in stats["debug_records"]
+                    if r.get("icp") and "fitness" in r["icp"]]
+        if icp_runs:
+            logger.info(
+                "icp mean: fitness=%.3f rmse=%.1fmm dt=%.1fmm dr=%.2fdeg",
+                sum(r["fitness"] for r in icp_runs) / len(icp_runs),
+                sum(r["inlier_rmse"] for r in icp_runs) / len(icp_runs) * 1000,
+                sum(r["translation_correction_m"] for r in icp_runs)
+                / len(icp_runs) * 1000,
+                sum(r["rotation_correction_deg"] for r in icp_runs) / len(icp_runs),
+            )
     if stats["missing_mask_frames"]:
         logger.warning("%d frames skipped for missing masks: %s%s",
                        len(stats["missing_mask_frames"]),

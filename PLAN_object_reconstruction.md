@@ -2029,6 +2029,15 @@ ICP refinement
 safety fallback
 ```
 
+**状态（2026-08-20）**：代码已实现，待目标容器 A/B 实测后决定默认开启。
+`registration/icp_refiner.py`：point-to-plane ICP（target 为积分当前帧之前
+的模型），§17 全部安全门限 + robot pose 回退，`icp.enabled` 可整体关闭；
+pipeline 逐关键帧调用并把 fitness / rmse / Δt / ΔR / 是否接受写入 debug
+记录；`run_offline_reconstruction.py --icp true|false` 分别输出到
+`output/run_icp_pose/` 与 `output/run_robot_pose/`（§18 A/B）。
+合成几何单测已在带 open3d 0.19 的环境验证：小扰动可收敛恢复、门限
+拒绝时严格回退 robot pose。
+
 ---
 
 ## Task 10
@@ -2103,8 +2112,8 @@ frame dropping
 - [x] 可以保存 `.ply` point cloud（output/pointcloud/object_a.ply + 增量快照 model_kf_XXX.ply）。
 - [ ] 可以保存 `.ply` mesh。
 - [x] 所有参数均从 YAML 配置读取。
-- [ ] ICP 可以通过 config 完全关闭。
-- [ ] 不使用 ICP 时 pipeline 仍可正常工作。
+- [x] ICP 可以通过 config 完全关闭（`icp.enabled: false` / `--icp false` 时不构造 refiner）。
+- [x] 不使用 ICP 时 pipeline 仍可正常工作（Task 6–8 全部实测均在无 ICP 下完成）。
 
 ---
 
