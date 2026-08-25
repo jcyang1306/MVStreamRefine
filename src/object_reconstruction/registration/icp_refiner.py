@@ -1,11 +1,11 @@
 """ICP pose refinement with safety fallback (PLAN sections 16-17, Task 9).
 
-Point-to-plane ICP refines the robot-provided pose T_world_cam2 of a cam2
+Point-to-plane ICP refines the robot-provided pose T_world_cam of a wrist-camera
 keyframe against the object model fused so far:
 
-    source = current cam2 object point cloud, still in the cam2 frame
+    source = current object point cloud, still in the camera frame
     target = object model in WORLD extracted BEFORE integrating this frame
-    init   = T_world_cam2 from robot kinematics (strong prior)
+    init   = T_world_cam from robot kinematics (strong prior)
 
 The refined pose is accepted only when all safety gates pass (fitness, rmse,
 correction magnitude); otherwise the robot pose is kept. ICP is a local
@@ -134,7 +134,7 @@ class ICPRefiner:
     ) -> ICPResult:
         """Point-to-plane ICP; falls back to the robot pose on any gate failure.
 
-        current_object_pcd_cam: (N, 3) float meters, cam2 frame.
+        current_object_pcd_cam: (N, 3) float meters, camera frame.
         model_pcd_world:        (M, 3) float meters, WORLD frame, extracted
                                 before integrating the current frame.
         T_world_cam_initial:    4x4 robot-kinematics pose (strong prior).

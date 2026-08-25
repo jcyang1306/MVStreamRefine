@@ -1,13 +1,12 @@
-"""Rigid-transform utilities and the confirmed T_world_cam2 composition.
+"""Rigid-transform utilities for the single wrist-camera system.
 
 Confirmed conventions (capture side, 2026-08-19):
     pose 7D           = x, y, z, qx, qy, qz, qw  (quaternion order xyzw)
     pose semantics    = T_base_tcp (robot TCP pose in base frame)
-    handeye wrist_cam2 = T_tcp_cam2  (RealSense2 pose in TCP frame)
-    handeye base_cam1  = T_base_cam1 (RealSense1 pose in robot base frame)
-    WORLD = cam1 (head optical frame)
+    handeye wrist_cam2 = T_tcp_cam (wrist camera pose in TCP frame)
+    WORLD = robot base frame
 
-    T_world_cam2 = inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2
+    T_world_cam = T_base_tcp @ T_tcp_cam
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import numpy as np
 
 SUPPORTED_POSE_SEMANTICS = "T_base_tcp"
 SUPPORTED_QUATERNION_ORDER = "xyzw"
-SUPPORTED_HANDEYE_CONVENTION = "wrist_cam2=T_tcp_cam2,base_cam1=T_base_cam1"
+SUPPORTED_HANDEYE_CONVENTION = "wrist_cam2=T_tcp_cam"
 
 
 def quaternion_xyzw_to_rotation(q: np.ndarray) -> np.ndarray:
@@ -74,15 +73,14 @@ def validate_transform(T: np.ndarray, tolerance: float = 1e-5) -> None:
         raise ValueError("rotation part is not orthonormal")
 
 
-def compose_T_world_cam2(
-    T_base_cam1: np.ndarray,
+def compose_T_world_cam(
     T_base_tcp: np.ndarray,
-    T_tcp_cam2: np.ndarray,
+    T_tcp_cam: np.ndarray,
 ) -> np.ndarray:
-    """WORLD = cam1: T_world_cam2 = inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2."""
-    for T in (T_base_cam1, T_base_tcp, T_tcp_cam2):
+    """WORLD = robot base: T_world_cam = T_base_tcp @ T_tcp_cam."""
+    for T in (T_base_tcp, T_tcp_cam):
         validate_transform(T)
-    return invert_transform(T_base_cam1) @ T_base_tcp @ T_tcp_cam2
+    return T_base_tcp @ T_tcp_cam
 
 
 def check_supported_conventions(

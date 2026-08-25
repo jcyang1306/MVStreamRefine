@@ -6,7 +6,7 @@ numpy>=1.24.4
 pillow>=9.4.0
 PyYAML>=6.0
 # GUI-enabled OpenCV is required by precompute_masks.py for interactive ROI
-# selection when --cam1-box / --cam2-box are omitted.
+# selection when --cam-box is omitted.
 opencv-python>=4.8
 open3d>=0.18
 tqdm>=4.66.1

@@ -1,7 +1,7 @@
 """Incremental reconstruction viewer (PLAN section 14, Task 8).
 
-Shows the TSDF-extracted object point cloud, the fixed cam1 (WORLD) frame,
-the current cam2 frame and the accumulated cam2 trajectory. Refreshed by the
+Shows the TSDF-extracted object point cloud, the robot-base WORLD frame, the
+current wrist-camera frame and its accumulated trajectory. Refreshed by the
 pipeline every N accepted keyframes; never per input frame.
 
 Hotkeys:
@@ -26,7 +26,7 @@ _KEY_SPACE, _KEY_S, _KEY_M, _KEY_Q = 32, 83, 77, 81
 class NullViewer:
     """No-op stand-in used when visualization is disabled or headless."""
 
-    def update(self, point_cloud: Any, T_world_cam2: np.ndarray) -> bool:
+    def update(self, point_cloud: Any, T_world_cam: np.ndarray) -> bool:
         return True
 
     def close(self) -> None:
@@ -67,17 +67,17 @@ class LiveViewer:
 
         self._pcd = open3d.geometry.PointCloud()
         self._trajectory = open3d.geometry.PointCloud()
-        self._cam2_frame = open3d.geometry.TriangleMesh.create_coordinate_frame(
+        self._cam_frame = open3d.geometry.TriangleMesh.create_coordinate_frame(
             size=frame_size_m
         )
-        self._T_cam2_shown = np.eye(4)
-        # cam1 == WORLD: a static frame at the origin.
+        self._T_cam_shown = np.eye(4)
+        # WORLD is robot base: show its static frame at the origin.
         self._vis.add_geometry(
             open3d.geometry.TriangleMesh.create_coordinate_frame(size=frame_size_m)
         )
         self._vis.add_geometry(self._pcd)
         self._vis.add_geometry(self._trajectory)
-        self._vis.add_geometry(self._cam2_frame)
+        self._vis.add_geometry(self._cam_frame)
         self._first_update = True
 
     # -- key callbacks -------------------------------------------------------
@@ -103,21 +103,21 @@ class LiveViewer:
 
     # -- pipeline interface ----------------------------------------------------
 
-    def update(self, point_cloud: Any, T_world_cam2: np.ndarray) -> bool:
+    def update(self, point_cloud: Any, T_world_cam: np.ndarray) -> bool:
         """Refresh all geometry; returns False when the user requested quit."""
         legacy = point_cloud.to_legacy() if hasattr(point_cloud, "to_legacy") else point_cloud
         self._pcd.points = legacy.points
         self._pcd.colors = legacy.colors
 
-        T = np.asarray(T_world_cam2, dtype=np.float64)
-        self._cam2_frame.transform(T @ np.linalg.inv(self._T_cam2_shown))
-        self._T_cam2_shown = T
+        T = np.asarray(T_world_cam, dtype=np.float64)
+        self._cam_frame.transform(T @ np.linalg.inv(self._T_cam_shown))
+        self._T_cam_shown = T
         self._trajectory.points.append(T[:3, 3])
         self._trajectory.paint_uniform_color([1.0, 0.0, 0.0])
 
         self._vis.update_geometry(self._pcd)
         self._vis.update_geometry(self._trajectory)
-        self._vis.update_geometry(self._cam2_frame)
+        self._vis.update_geometry(self._cam_frame)
         if self._first_update:
             self._vis.reset_view_point(True)
             self._first_update = False

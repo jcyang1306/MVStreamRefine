@@ -27,29 +27,29 @@ def test_first_packet_contents(source):
     packet = source.read_packet(0)
     assert packet.index == 0
     assert packet.timestamp is None
-    for cam in (packet.cam1, packet.cam2):
-        assert cam.rgb.shape == (720, 1280, 3)
-        assert cam.rgb.dtype == np.uint8
-        assert cam.depth.shape == (720, 1280)
-        assert cam.depth.dtype == np.uint16
-    assert np.allclose(packet.T_world_cam1, np.eye(4))
+    assert packet.cam.rgb.shape == (720, 1280, 3)
+    assert packet.cam.rgb.dtype == np.uint8
+    assert packet.cam.depth.shape == (720, 1280)
+    assert packet.cam.depth.dtype == np.uint16
+    assert set(source._frame_paths(0)) == {"rgb", "depth", "pose"}
+    assert all("head" not in str(path) for path in source._frame_paths(0).values())
 
 
 def test_confirmed_conventions_produce_world_pose(source):
     assert source.conventions_confirmed is True
     packet = source.read_packet(0)
-    T = packet.T_world_cam2
+    T = packet.T_world_cam
     assert T is not None and T.shape == (4, 4)
     assert abs(np.linalg.det(T[:3, :3]) - 1.0) < 1e-6
     assert np.allclose(T[3], [0, 0, 0, 1])
     # Composition matches the confirmed formula.
     from object_reconstruction.calibration.transforms import (
-        compose_T_world_cam2,
+        compose_T_world_cam,
         pose7d_to_matrix,
     )
 
-    expected = compose_T_world_cam2(
-        source.T_base_cam1, pose7d_to_matrix(packet.raw_pose_7d), source.T_tcp_cam2
+    expected = compose_T_world_cam(
+        pose7d_to_matrix(packet.raw_pose_7d), source.T_tcp_cam
     )
     assert np.allclose(T, expected)
     # Raw pose is still carried through.
@@ -66,7 +66,7 @@ def test_unconfirmed_conventions_block_world_pose():
     blocked = OfflineFrameSource.from_config(config)
     assert blocked.conventions_confirmed is False
     packet = blocked.read_packet(0)
-    assert packet.T_world_cam2 is None
+    assert packet.T_world_cam is None
 
 
 def test_pose_table_matches_per_frame_files(source):

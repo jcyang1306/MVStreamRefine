@@ -1,10 +1,10 @@
 """Phase 0 dataset inspection (PLAN section 6). No reconstruction here.
 
-Checks every frame of the flat offline dataset, writes
+Checks every frame of the single wrist-camera offline dataset, writes
 output/debug/dataset_report.json, and saves a few side-by-side RGB/depth
 preview montages. While pose/handeye/depth conventions are unconfirmed
 (null in config), raw values are reported and blockers are listed;
-T_world_cam2 is never constructed.
+T_world_cam is never constructed.
 """
 
 from __future__ import annotations
@@ -36,16 +36,14 @@ def depth_to_visual(depth: np.ndarray) -> Image.Image:
 def save_preview(source: OfflineFrameSource, position: int, out_dir: Path) -> Path:
     packet = source.read_packet(position)
     tiles = [
-        Image.fromarray(packet.cam1.rgb),
-        depth_to_visual(packet.cam1.depth),
-        Image.fromarray(packet.cam2.rgb),
-        depth_to_visual(packet.cam2.depth),
+        Image.fromarray(packet.cam.rgb),
+        depth_to_visual(packet.cam.depth),
     ]
     w, h = tiles[0].size
-    montage = Image.new("RGB", (w * 2, h * 2))
+    montage = Image.new("RGB", (w * 2, h))
     for i, tile in enumerate(tiles):
-        montage.paste(tile, ((i % 2) * w, (i // 2) * h))
-    montage = montage.resize((w, h))
+        montage.paste(tile, (i * w, 0))
+    montage = montage.resize((w, h // 2))
     path = out_dir / f"preview_{packet.index:06d}.png"
     montage.save(path)
     return path
@@ -76,24 +74,32 @@ def inspect(config_path: str, preview_count: int) -> int:
         failures.append(f"{len(source.missing_files)} frame indices have missing files")
 
     # Intrinsics.
-    for name, intr in (("cam1_head", source.intrinsics_cam1), ("cam2_wrist", source.intrinsics_cam2)):
-        intr.validate()
-        report["checks"][f"intrinsics_{name}"] = {
-            "width": intr.width, "height": intr.height,
-            "fx": intr.fx, "fy": intr.fy, "cx": intr.cx, "cy": intr.cy,
-        }
+    intr = source.intrinsics_cam
+    intr.validate()
+    report["checks"]["intrinsics_cam"] = {
+        "width": intr.width, "height": intr.height,
+        "fx": intr.fx, "fy": intr.fy, "cx": intr.cx, "cy": intr.cy,
+    }
 
-    # Hand-eye matrices: numeric sanity only; frame semantics stay unconfirmed.
+    # Only the wrist-camera hand-eye is part of the new system. Legacy
+    # base_cam1 may remain in the file but is deliberately ignored.
     handeye = load_handeye_matrices(source.root / "handeye" / "handeye_tf.txt")
     report["checks"]["handeye"] = {}
-    for label, T in handeye.items():
+    if "wrist_cam2" not in handeye:
+        failures.append("handeye is missing wrist_cam2 (T_tcp_cam)")
+    else:
+        T = handeye["wrist_cam2"]
         det = float(np.linalg.det(T[:3, :3]))
         bottom_ok = bool(np.allclose(T[3], [0, 0, 0, 1]))
-        report["checks"]["handeye"][label] = {"rotation_det": det, "bottom_row_ok": bottom_ok}
+        report["checks"]["handeye"]["wrist_cam2"] = {
+            "semantic": "T_tcp_cam",
+            "rotation_det": det,
+            "bottom_row_ok": bottom_ok,
+        }
         if abs(det - 1.0) > 1e-3:
-            failures.append(f"handeye {label}: det(R) = {det}")
+            failures.append(f"handeye wrist_cam2: det(R) = {det}")
         if not bottom_ok:
-            failures.append(f"handeye {label}: bottom row is not [0,0,0,1]")
+            failures.append("handeye wrist_cam2: bottom row is not [0,0,0,1]")
 
     # Raw pose table statistics + per-frame cross-check.
     poses = source.raw_poses
@@ -121,24 +127,24 @@ def inspect(config_path: str, preview_count: int) -> int:
     depth_stats = []
     for position, index in enumerate(source.indices):
         packet = source.read_packet(position)
-        for cam_name, cam in (("cam1", packet.cam1), ("cam2", packet.cam2)):
-            expected = (cam.intrinsics.height, cam.intrinsics.width)
-            if cam.rgb.shape != (*expected, 3) or cam.rgb.dtype != np.uint8:
-                failures.append(f"frame {index} {cam_name}: bad RGB {cam.rgb.shape} {cam.rgb.dtype}")
-                shapes_ok = False
-            if cam.depth.shape != expected or cam.depth.dtype != np.uint16:
-                failures.append(f"frame {index} {cam_name}: bad depth {cam.depth.shape} {cam.depth.dtype}")
-                shapes_ok = False
-            valid_ratio = float((cam.depth > 0).mean())
-            depth_stats.append(
-                {
-                    "frame": index,
-                    "cam": cam_name,
-                    "min_raw": int(cam.depth[cam.depth > 0].min()) if (cam.depth > 0).any() else 0,
-                    "max_raw": int(cam.depth.max()),
-                    "valid_ratio": valid_ratio,
-                }
-            )
+        cam = packet.cam
+        expected = (cam.intrinsics.height, cam.intrinsics.width)
+        if cam.rgb.shape != (*expected, 3) or cam.rgb.dtype != np.uint8:
+            failures.append(f"frame {index} cam: bad RGB {cam.rgb.shape} {cam.rgb.dtype}")
+            shapes_ok = False
+        if cam.depth.shape != expected or cam.depth.dtype != np.uint16:
+            failures.append(f"frame {index} cam: bad depth {cam.depth.shape} {cam.depth.dtype}")
+            shapes_ok = False
+        valid_ratio = float((cam.depth > 0).mean())
+        depth_stats.append(
+            {
+                "frame": index,
+                "cam": "cam",
+                "min_raw": int(cam.depth[cam.depth > 0].min()) if (cam.depth > 0).any() else 0,
+                "max_raw": int(cam.depth.max()),
+                "valid_ratio": valid_ratio,
+            }
+        )
     report["checks"]["shapes_and_dtypes_ok"] = shapes_ok
     valid_ratios = [s["valid_ratio"] for s in depth_stats]
     report["checks"]["depth_summary"] = {

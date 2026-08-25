@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "object-reconstruction"
 version = "0.1.0"
-description = "Object-centric incremental RGB-D reconstruction from dual RealSense offline data"
+description = "Object-centric incremental RGB-D reconstruction from a robot wrist camera"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24.4",

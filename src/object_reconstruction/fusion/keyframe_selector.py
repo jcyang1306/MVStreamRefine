@@ -1,6 +1,6 @@
-"""Keyframe selection for the moving wrist camera (PLAN section 13, Task 7).
+"""Keyframe selection for the moving wrist camera.
 
-A cam2 frame becomes a keyframe when the camera moved enough since the last
+A camera frame becomes a keyframe when the camera moved enough since the last
 accepted keyframe (translation OR rotation threshold) AND the object mask is
 still trustworthy (area and valid-depth-ratio gates). The very first frame
 that passes the quality gates is always accepted.

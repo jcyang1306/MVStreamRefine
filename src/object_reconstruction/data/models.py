@@ -51,13 +51,12 @@ class FramePacket:
     # Current offline dataset carries no timestamps; sync is by frame index only.
     timestamp: float | None
 
-    cam1: CameraFrame
-    cam2: CameraFrame
+    cam: CameraFrame
 
-    T_world_cam1: np.ndarray  # float64, 4 x 4
     # None until pose_semantics / quaternion_order / handeye_convention are
     # confirmed in config; constructing it from unconfirmed conventions is forbidden.
-    T_world_cam2: np.ndarray | None
+    # WORLD is the robot base frame in the single-camera system.
+    T_world_cam: np.ndarray | None
 
     tcp_pose: np.ndarray | None = None
     raw_pose_7d: np.ndarray | None = None

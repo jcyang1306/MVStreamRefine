@@ -1,52 +1,57 @@
 # MVStreamRefine
 
-双 RealSense（head 固定 + wrist 眼在手上）离线 RGB-D 数据的 object-centric 增量重建。
-完整开发计划见 `PLAN_object_reconstruction.md`。
+机械臂腕部单 RealSense 的 object-centric 增量 RGB-D 重建。
 
-## 仓库结构
+- 唯一逻辑相机名：`cam`
+- 物理数据前缀：`wrist`（保留旧数据命名）
+- 世界坐标系：robot base
+- 位姿链：`T_world_cam = T_base_tcp @ T_tcp_cam`
+- 主链路：SAM 2.1 mask → masked RGB-D → keyframe → optional ICP → TSDF
+
+## 数据约定
 
 ```text
-data/                      离线采集数据（113 帧 head/wrist RGB-D + pose + 标定）
-src/segmention/sam2/       自包含 SAM 2.1 推理包（sam2-inference）
-src/object_reconstruction/ 重建工程（按 PLAN Task 顺序实现中）
-tools/                     CLI 工具
-configs/offline.yaml       离线 pipeline 配置
-Dockerfile / compose.yaml  部署镜像（CUDA 12.1 runtime，RTX 3060 + driver 535）
+data/
+├── frame-XXXXXX_wrist_color.jpg
+├── frame-XXXXXX_wrist_depth.png
+├── frame-XXXXXX_pose.txt
+├── JointStates.txt
+├── intrinsic/wrist_cam_K.txt
+└── handeye/handeye_tf.txt
 ```
 
-## 本地开发（Task 1 数据检查）
+- 7D pose：`x,y,z,qx,qy,qz,qw`，语义为 `T_base_tcp`
+- hand-eye 继续使用物理标签 `wrist_cam2`，语义为 `T_tcp_cam`
+- depth：uint16 PNG，单位 mm，`depth.scale = 1000`
+- legacy head 文件、head 内参和 `base_cam1` 标定块允许留在数据目录，但不会被读取
+
+## 本地开发
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[test]"
-python tools/inspect_dataset.py --config configs/offline.yaml
 pytest
+python tools/inspect_dataset.py --config configs/offline.yaml
 ```
 
-## Docker 部署（目标机：RTX 3060，driver 535）
+## Docker
+
+目标环境：RTX 3060、NVIDIA driver 535；镜像使用 CUDA 12.1 runtime。
 
 ```bash
-# 先验证 NVIDIA Container Toolkit
 docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
-
 docker compose build
 docker compose run --rm reconstruction \
   python3 tools/inspect_dataset.py --config configs/offline.yaml
-
-# GPU 通过 compose.yaml 的 deploy.resources.reservations.devices 声明。
-# 若 compose 版本过旧仍报 schema 错误，可退回：
-# docker build -t mvstreamrefine:cu121 .
-# docker run --rm --gpus all --shm-size=8g ... mvstreamrefine:cu121
 ```
 
-SAM 2.1 checkpoint 不入库，放在 `checkpoints/` 并通过只读 volume 挂载为
+SAM 2.1 checkpoint 放到 `checkpoints/`，容器内挂载为
 `/models/sam2.1_hiera_tiny.pt`。
 
-## Mask 预计算（Task 3，需在 CUDA 容器内运行）
+## 1. Mask 预计算
 
-不传 `--cam1-box` / `--cam2-box` 时，工具会依次显示 head 和 wrist
-首帧。鼠标拖框后按 Enter/Space 确认（按 C 取消）。Docker 需要传入宿主机
-X11 显示：
+交互选择首帧 ROI：
 
 ```bash
 xhost +si:localuser:root
@@ -58,106 +63,83 @@ docker compose run --rm \
 xhost -si:localuser:root
 ```
 
-无图形界面或自动化运行时仍可显式传入像素坐标 `xyxy`，此时不会打开窗口：
+无窗口时传 `xyxy`：
 
 ```bash
 docker compose run --rm reconstruction \
   python3 tools/precompute_masks.py --config configs/offline.yaml \
-  --cam1-box X1 Y1 X2 Y2 --cam2-box X1 Y1 X2 Y2
+  --cam-box X1 Y1 X2 Y2
 ```
 
-输出：`output/masks/cam{1,2}/*.png`（0/255）、`mask_metadata.jsonl`
-（mask_area / iou_prev / valid_depth_ratio）以及 `output/masks/previews/`
-叠加图供人工抽检。重建阶段默认读取该缓存，不重复执行 SAM 2.1。
+新结果写入 `output/masks/cam/*.png`。重建也兼容读取已有的
+`output/masks/cam2/*.png`，但不再读取 cam1 mask。
 
-## TSDF cam1 单视角验收（Task 5，需在 CUDA 容器内运行）
+## 2. 坐标变换验证
 
-依赖 Task 3 的 mask 缓存（`output/masks/`）。cam1（head）固定为 WORLD，
-取前 N 帧（默认 10）以单位位姿积分进 TSDF，导出点云：
+验证腕部相机随机器人运动时，静态场景在 robot base 下保持一致，并与错误
+的 `inv(T_tcp_cam)` 方向对照：
 
 ```bash
 docker compose run --rm reconstruction \
-  python3 tools/validate_tsdf_cam1.py --config configs/offline.yaml
+  python3 tools/validate_transforms.py --config configs/offline.yaml
 ```
 
-成功时打印每帧 mask 面积 / 有效深度比、总点数与边界盒，并保存
-`output/debug/tsdf_cam1.ply`（可用 MeshLab / CloudCompare 检查物体形状）。
-点数为 0 或 mask 缓存缺失时以非零退出码失败。帧数可用 `--frames` 调整。
+报告写入 `output/debug/transform_validation.json`，可视化点云与轨迹写入
+`output/debug/transforms/`。该工具不再计算跨相机 overlap。
 
-## 双相机增量重建（Task 6–8，需在 CUDA 容器内运行）
+## 3. 单相机 TSDF smoke test
 
-完整融合循环（无 ICP）：cam1 低频锚定（前 `cam1.initial_frames` 帧 +
-每 `update_interval_frames` 一帧），cam2 按关键帧准入（位移 > 2cm 或
-旋转 > 5°，且 mask 面积 / 有效深度比过门限）以已知位姿 `T_world_cam2` 积分。
-无显示环境时加 `--no-viewer`：
+使用真实 `T_world_cam` 积分前若干个关键帧：
 
 ```bash
 docker compose run --rm reconstruction \
-  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml --no-viewer
+  python3 tools/validate_tsdf_cam.py \
+  --config configs/offline.yaml --keyframes 5
 ```
 
-带实时可视化（需 X11，同 mask 交互选框的用法）：
+结果保存为 `output/debug/tsdf_cam.ply`。
 
-```bash
-xhost +local:root   # 或 +si:localuser:root
-docker compose run --rm -e DISPLAY="$DISPLAY" -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  reconstruction python3 tools/run_offline_reconstruction.py --config configs/offline.yaml
-```
+## 4. 完整离线重建
 
-查看器每 `visualization.update_every_keyframes` 个关键帧刷新一次，显示
-TSDF 点云、cam1（世界）坐标系、cam2 当前坐标系与轨迹；热键：SPACE 暂停、
-S 保存点云、M 保存 mesh、Q 提前退出（退出时仍保存当前结果）。
-
-输出（Task 8）：
-
-- `output/pointcloud/object_a.ply`：最终点云
-- `output/mesh/object_a_mesh.ply`：最终三角 mesh
-- `output/pointcloud/model_kf_XXX.ply`：增量快照（`output.save_keyframes`，
-  用于人工确认模型随关键帧增加逐渐完整）
-- `output/debug/fusion_debug.jsonl`：逐关键帧 debug 记录（frame id、
-  keyframe id、`T_world_cam2`、mask 面积、有效深度比、TSDF block 数、点数）
-- `output/logs/run_*.log`：运行日志
-
-验收现象：随 cam2 运动，物体模型比单视角更完整（侧面/背面补全）；
-无任何 cam2 关键帧时以非零退出码失败。调试可加 `--max-frames N`。
-
-## ICP 精配准与 A/B 对比（Task 9）
-
-每个 cam2 关键帧在积分**之前**，用 point-to-plane ICP 把 robot pose 与当前
-已融合模型（WORLD 系）配准微调；安全门限（`icp.min_fitness` /
-`max_rmse_m` / `max_translation_correction_m` / `max_rotation_correction_deg`）
-任一不过即回退 robot pose——机器人位姿是强先验，ICP 只做局部微调。
-
-A/B 对比（PLAN §18）：
+无窗口运行：
 
 ```bash
 docker compose run --rm reconstruction \
-  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml \
-  --no-viewer --icp false   # -> output/run_robot_pose/
-docker compose run --rm reconstruction \
-  python3 tools/run_offline_reconstruction.py --config configs/offline.yaml \
-  --no-viewer --icp true    # -> output/run_icp_pose/
+  python3 tools/run_offline_reconstruction.py \
+  --config configs/offline.yaml --no-viewer
 ```
 
-两次运行各自输出点云/mesh/debug jsonl（含每关键帧 fitness、rmse、
-Δtranslation、Δrotation 与是否接受）。重点对比：表面厚度、双层表面、
-边缘锐度、cam1/cam2 重叠区域。确认 ICP 确实改善后，再把
-`configs/offline.yaml` 的 `icp.enabled` 改为 `true` 作为默认。
+带 X11 viewer 时去掉 `--no-viewer`。窗口显示 robot-base 原点、当前 cam
+坐标系、cam 轨迹和 TSDF 点云；热键：SPACE 暂停、S 保存点云、M 保存
+mesh、Q 提前退出。
 
-## 数据语义（已确认，2026-08-19）
+输出：
 
-- `pose_semantics = T_base_tcp`：7D 位姿为 `x,y,z,qx,qy,qz,qw`
-- `quaternion_order = xyzw`
-- `handeye`：`wrist_cam2 = T_tcp_cam2`，`base_cam1 = T_base_cam1`
-- `depth.scale = 1000.0`（采集端将米 ×1000 存为 uint16 mm）
+```text
+output/pointcloud/object_a.ply
+output/mesh/object_a_mesh.ply
+output/pointcloud/model_kf_XXX.ply
+output/debug/fusion_debug.jsonl
+output/logs/run_*.log
+```
 
-`T_world_cam2 = inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2`（WORLD = cam1/head）。
+debug 位姿字段为 `T_world_cam` 和 `T_world_cam_used`，WORLD 均指 robot base。
 
-## 坐标变换验证状态
+## 5. ICP A/B
 
-`tools/validate_transforms.py` 实测通过（2026-08-19，重标定 `base_cam1` 后）：
+ICP 默认关闭。它只允许在 robot pose 附近做局部微调；fitness、RMSE 或
+修正量门限不通过时必须回退 `T_world_cam`。
 
-- cam2 运动时静止场景世界点云跨帧一致性 0.71（翻转 wrist 手眼后降至 0.44）；
-- cam2 点云与固定 cam1 点云跨相机重叠 0.34（所有翻转变体仅 0.01–0.02）。
+```bash
+docker compose run --rm reconstruction \
+  python3 tools/run_offline_reconstruction.py \
+  --config configs/offline.yaml --no-viewer --icp false
 
-当前无阻塞项，双相机融合链路可用。
+docker compose run --rm reconstruction \
+  python3 tools/run_offline_reconstruction.py \
+  --config configs/offline.yaml --no-viewer --icp true
+```
+
+结果分别写入 `output/run_robot_pose/` 与 `output/run_icp_pose/`。重点比较
+单相机多帧融合后的表面厚度、重影、边缘锐度和轨迹一致性；确认 ICP 改善
+后才应将 `icp.enabled` 设为 true。

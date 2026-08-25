@@ -1,9 +1,8 @@
-"""Task 3: precompute object-A masks for the full sequence with SAM 2.1.
+"""Precompute object-A masks for the sole wrist-camera stream with SAM 2.1.
 
-Each camera runs as its own video stream (sequentially on RTX 3060): JPEGs are
-staged into a numeric symlink directory, tracking is anchored by a manual
-first-frame xyxy box prompt, and every resulting mask is written to the disk
-cache (output/masks/cam{1,2}/*.png + mask_metadata.jsonl). Reconstruction
+JPEGs are staged into a numeric symlink directory, tracking is anchored by a
+manual first-frame xyxy box prompt, and every resulting mask is written to the
+disk cache (output/masks/cam/*.png + mask_metadata.jsonl). Reconstruction
 later reads this cache instead of re-running SAM 2.1.
 
 Video tracking has no quality scores, so per-frame metadata records mask area,
@@ -11,10 +10,10 @@ IoU with the previous frame and valid-depth ratio; a few RGB overlay previews
 are saved for human spot checks.
 
 Requires torch + sam2-inference + checkpoint (run inside the CUDA container).
-If a camera box is omitted, its first RGB frame is shown for interactive ROI
+If the camera box is omitted, its first RGB frame is shown for interactive ROI
 selection (drag the rectangle, then press Enter/Space; press C to cancel):
     python tools/precompute_masks.py --config configs/offline.yaml \
-        [--cam1-box X1 Y1 X2 Y2] [--cam2-box X1 Y1 X2 Y2]
+        [--cam-box X1 Y1 X2 Y2]
 """
 
 from __future__ import annotations
@@ -37,9 +36,6 @@ from object_reconstruction.segmentation.sam2_segmenter import (
     stage_jpeg_sequence,
 )
 from object_reconstruction.utils.config import load_config
-
-CAM_PREFIX_ATTR = {1: "cam1_prefix", 2: "cam2_prefix"}
-
 
 def select_interactive_box(
     image_path: str | Path, camera_name: str
@@ -89,22 +85,17 @@ def select_interactive_box(
     return box
 
 
-def resolve_boxes(
+def resolve_box(
     source: OfflineFrameSource,
-    cam1_box: list[float] | None,
-    cam2_box: list[float] | None,
-) -> dict[int, tuple[float, float, float, float]]:
-    """Use CLI boxes when present; interactively select every missing box."""
-    boxes: dict[int, tuple[float, float, float, float]] = {}
+    cam_box: list[float] | None,
+) -> tuple[float, float, float, float]:
+    """Use the CLI box when present; otherwise select it interactively."""
+    if cam_box is not None:
+        return tuple(cam_box)
     first_index = source.indices[0]
-    for cam, provided in ((1, cam1_box), (2, cam2_box)):
-        prefix = getattr(source, CAM_PREFIX_ATTR[cam])
-        if provided is None:
-            image_path = source.root / f"frame-{first_index:06d}_{prefix}_color.jpg"
-            boxes[cam] = select_interactive_box(image_path, f"cam{cam} ({prefix})")
-        else:
-            boxes[cam] = tuple(provided)
-    return boxes
+    prefix = source.cam_prefix
+    image_path = source.root / f"frame-{first_index:06d}_{prefix}_color.jpg"
+    return select_interactive_box(image_path, f"cam ({prefix})")
 
 
 def load_depth(source: OfflineFrameSource, prefix: str, index: int) -> np.ndarray:
@@ -130,17 +121,16 @@ def save_overlay(
 
 
 def run_stream(
-    cam: int,
     box: tuple[float, float, float, float],
     config: dict,
     source: OfflineFrameSource,
     cache: MaskCache,
     preview_every: int,
 ) -> list[dict]:
-    prefix = getattr(source, CAM_PREFIX_ATTR[cam])
+    prefix = source.cam_prefix
     staging_dir = Path(config["sam2"]["staging_root"]) / prefix
     stage_jpeg_sequence(source.root, prefix, source.indices, staging_dir)
-    print(f"[cam{cam}] staged {len(source.indices)} frames -> {staging_dir}")
+    print(f"[cam] staged {len(source.indices)} frames -> {staging_dir}")
 
     depth_cfg = config["depth"]
     depth_scale = float(depth_cfg["scale"])
@@ -152,7 +142,7 @@ def run_stream(
     records: list[dict] = []
     previous_mask: np.ndarray | None = None
     for frame_index, mask in segmenter.track_sequence(staging_dir, prompt):
-        cache.save(cam, frame_index, mask)
+        cache.save(frame_index, mask)
 
         area = int(mask.sum())
         depth_m = load_depth(source, prefix, frame_index).astype(np.float64) / depth_scale
@@ -161,7 +151,6 @@ def run_stream(
         records.append(
             {
                 "frame": int(frame_index),
-                "cam": cam,
                 "mask_area": area,
                 "valid_depth_ratio": round(valid_depth_ratio, 4),
                 "iou_prev": None if (v := iou(previous_mask, mask)) is None else round(v, 4),
@@ -172,7 +161,7 @@ def run_stream(
         if frame_index % preview_every == 0 or frame_index == source.indices[-1]:
             save_overlay(
                 source, prefix, frame_index, mask,
-                preview_dir / f"cam{cam}_{frame_index:06d}.png",
+                preview_dir / f"cam_{frame_index:06d}.png",
             )
 
     del segmenter
@@ -180,31 +169,30 @@ def run_stream(
     return records
 
 
-def summarize(cam: int, records: list[dict], min_area_px: int, total_frames: int) -> bool:
+def summarize(records: list[dict], min_area_px: int, total_frames: int) -> bool:
     areas = [r["mask_area"] for r in records]
     small = [r["frame"] for r in records if r["mask_area"] < min_area_px]
     ious = [r["iou_prev"] for r in records if r["iou_prev"] is not None]
     print(
-        f"[cam{cam}] masks {len(records)}/{total_frames}  "
+        f"[cam] masks {len(records)}/{total_frames}  "
         f"area min/mean {min(areas)}/{int(np.mean(areas))}  "
         f"iou_prev min/mean {min(ious):.3f}/{np.mean(ious):.3f}"
     )
     if small:
-        print(f"[cam{cam}] WARNING: {len(small)} frames below min_area_px={min_area_px}: "
+        print(f"[cam] WARNING: {len(small)} frames below min_area_px={min_area_px}: "
               f"{small[:10]}{'...' if len(small) > 10 else ''}")
     ok = len(records) == total_frames and min(areas) > 0
     if not ok:
-        print(f"[cam{cam}] FAIL: missing or empty masks")
+        print("[cam] FAIL: missing or empty masks")
     return ok
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--cam1-box", type=float, nargs=4, metavar=("X1", "Y1", "X2", "Y2"),
-                        help="first-frame xyxy box for head; omitted = interactive selection")
-    parser.add_argument("--cam2-box", type=float, nargs=4, metavar=("X1", "Y1", "X2", "Y2"),
-                        help="first-frame xyxy box for wrist; omitted = interactive selection")
+    parser.add_argument("--cam-box", type=float, nargs=4,
+                        metavar=("X1", "Y1", "X2", "Y2"),
+                        help="first-frame xyxy box; omitted = interactive selection")
     parser.add_argument("--preview-every", type=int, default=20)
     args = parser.parse_args()
 
@@ -214,20 +202,14 @@ def main() -> int:
         return 1
     source = OfflineFrameSource.from_config(config)
     cache = MaskCache(Path(config["output"]["root"]) / "masks")
-    boxes = resolve_boxes(source, args.cam1_box, args.cam2_box)
+    box = resolve_box(source, args.cam_box)
+    records = run_stream(box, config, source, cache, args.preview_every)
+    ok = summarize(records, config["mask"]["min_area_px"], len(source))
 
-    all_records: list[dict] = []
-    all_ok = True
-    # PLAN section 8: run the two streams sequentially on RTX 3060.
-    for cam, box in boxes.items():
-        records = run_stream(cam, box, config, source, cache, args.preview_every)
-        all_records.extend(records)
-        all_ok &= summarize(cam, records, config["mask"]["min_area_px"], len(source))
-
-    cache.write_metadata(all_records)
+    cache.write_metadata(records)
     print(f"metadata: {cache.metadata_path}")
     print(f"previews: {cache.root / 'previews'} (human spot check)")
-    return 0 if all_ok else 1
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

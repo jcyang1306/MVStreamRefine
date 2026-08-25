@@ -1,9 +1,8 @@
-"""Parser for data/handeye/handeye_tf.txt.
+"""Parser for labeled 4x4 matrices in data/handeye/handeye_tf.txt.
 
-The file contains two labeled 4x4 matrices ("wrist_cam:" and "head_cam:") in a
-loose bracketed text format. Their source/target frame convention is NOT encoded
-in the file and must be confirmed via config (handeye_convention) before any of
-these matrices may be composed into T_world_cam2.
+The single-camera system consumes the legacy physical label ``wrist_cam2`` as
+``T_tcp_cam``. Additional legacy matrices may remain in the file and are
+ignored by the caller. Matrix direction is confirmed via handeye_convention.
 """
 
 from __future__ import annotations

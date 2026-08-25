@@ -3,7 +3,7 @@ import pytest
 
 from object_reconstruction.calibration.transforms import (
     check_supported_conventions,
-    compose_T_world_cam2,
+    compose_T_world_cam,
     invert_transform,
     pose7d_to_matrix,
     quaternion_xyzw_to_rotation,
@@ -43,11 +43,10 @@ def test_inverse_roundtrip():
 
 
 def test_composition_formula():
-    T_base_cam1 = rigid([0, 0, 1], 0.4, [0.1, 0.2, 0.3])
     T_base_tcp = rigid([1, 1, 0], -0.7, [0.5, -0.1, 0.2])
-    T_tcp_cam2 = rigid([0, 1, 0], 0.2, [0.02, 0.03, -0.05])
-    T = compose_T_world_cam2(T_base_cam1, T_base_tcp, T_tcp_cam2)
-    expected = np.linalg.inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2
+    T_tcp_cam = rigid([0, 1, 0], 0.2, [0.02, 0.03, -0.05])
+    T = compose_T_world_cam(T_base_tcp, T_tcp_cam)
+    expected = T_base_tcp @ T_tcp_cam
     assert np.allclose(T, expected, atol=1e-12)
     validate_transform(T)
 
@@ -61,10 +60,10 @@ def test_validate_rejects_scaled_rotation():
 
 def test_unsupported_conventions_fail_fast():
     with pytest.raises(NotImplementedError):
-        check_supported_conventions("T_tcp_base", "xyzw", "wrist_cam2=T_tcp_cam2,base_cam1=T_base_cam1")
+        check_supported_conventions("T_tcp_base", "xyzw", "wrist_cam2=T_tcp_cam")
     with pytest.raises(NotImplementedError):
-        check_supported_conventions("T_base_tcp", "wxyz", "wrist_cam2=T_tcp_cam2,base_cam1=T_base_cam1")
+        check_supported_conventions("T_base_tcp", "wxyz", "wrist_cam2=T_tcp_cam")
     # Confirmed combination passes.
     check_supported_conventions(
-        "T_base_tcp", "xyzw", "wrist_cam2=T_tcp_cam2,base_cam1=T_base_cam1"
+        "T_base_tcp", "xyzw", "wrist_cam2=T_tcp_cam"
     )

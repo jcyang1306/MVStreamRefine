@@ -1,9 +1,9 @@
 """Disk cache for precomputed object masks (PLAN section 8).
 
 Layout under output/masks/:
-    cam1/000000.png        0/255 uint8 PNG, one per original frame index
-    cam2/000000.png
-    mask_metadata.jsonl    one record per (frame, cam)
+    cam/000000.png         0/255 uint8 PNG, one per original frame index
+    cam2/000000.png        legacy read-only fallback
+    mask_metadata.jsonl    one record per frame
 
 Reconstruction reads this cache by default instead of re-running SAM 2.1.
 """
@@ -22,41 +22,40 @@ class MaskCache:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
 
-    def mask_path(self, cam: int, frame_index: int) -> Path:
-        if cam not in (1, 2):
-            raise ValueError(f"cam must be 1 or 2, got {cam}")
-        return self.root / f"cam{cam}" / f"{frame_index:06d}.png"
+    def mask_path(self, frame_index: int) -> Path:
+        return self.root / "cam" / f"{frame_index:06d}.png"
+
+    def legacy_mask_path(self, frame_index: int) -> Path:
+        return self.root / "cam2" / f"{frame_index:06d}.png"
 
     @property
     def metadata_path(self) -> Path:
         return self.root / "mask_metadata.jsonl"
 
-    def save(self, cam: int, frame_index: int, mask: np.ndarray) -> Path:
+    def save(self, frame_index: int, mask: np.ndarray) -> Path:
         mask = np.asarray(mask)
         if mask.ndim != 2:
             raise ValueError(f"mask must be 2-D, got shape {mask.shape}")
-        path = self.mask_path(cam, frame_index)
+        path = self.mask_path(frame_index)
         path.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(mask.astype(bool).astype(np.uint8) * 255).save(path)
         return path
 
-    def get(self, cam: int, frame_index: int) -> np.ndarray | None:
-        path = self.mask_path(cam, frame_index)
+    def get(self, frame_index: int) -> np.ndarray | None:
+        path = self.mask_path(frame_index)
+        if not path.is_file():
+            path = self.legacy_mask_path(frame_index)
         if not path.is_file():
             return None
         return np.asarray(Image.open(path)) > 0
 
-    def get_cam1(self, frame_index: int) -> np.ndarray | None:
-        return self.get(1, frame_index)
-
-    def get_cam2(self, frame_index: int) -> np.ndarray | None:
-        return self.get(2, frame_index)
-
-    def frames(self, cam: int) -> list[int]:
-        cam_dir = self.root / f"cam{cam}"
-        if not cam_dir.is_dir():
-            return []
-        return sorted(int(p.stem) for p in cam_dir.glob("*.png"))
+    def frames(self) -> list[int]:
+        """Return the union of new-layout and legacy cam2 frame indices."""
+        frames: set[int] = set()
+        for cam_dir in (self.root / "cam", self.root / "cam2"):
+            if cam_dir.is_dir():
+                frames.update(int(path.stem) for path in cam_dir.glob("*.png"))
+        return sorted(frames)
 
     def write_metadata(self, records: list[dict[str, Any]]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)

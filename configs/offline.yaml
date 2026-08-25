@@ -1,20 +1,20 @@
 dataset:
   root: "./data"
   layout: "current_flat"
-  cam1_prefix: "head"
-  cam2_prefix: "wrist"
+  # Logical camera name is "cam"; existing files retain the physical "wrist" prefix.
+  cam_prefix: "wrist"
   frame_count_expected: 113
   pose_source: "JointStates.txt"
   # 已由采集端确认（2026-08-19）：
   # 7D pose = x, y, z, qx, qy, qz, qw，表示机械臂 TCP 在 base 系下的位姿。
   pose_semantics: "T_base_tcp"
   quaternion_order: "xyzw"
-  # handeye_tf.txt: wrist_cam2 = T_tcp_cam2（末端→RealSense2），
-  #                 base_cam1  = T_base_cam1（机械臂 base→RealSense1）。
-  # T_world_cam2 = inv(T_base_cam1) @ T_base_tcp @ T_tcp_cam2，WORLD = cam1(head)。
-  handeye_convention: "wrist_cam2=T_tcp_cam2,base_cam1=T_base_cam1"
+  # handeye_tf.txt 保留物理标签 wrist_cam2，其矩阵语义为 T_tcp_cam。
+  # WORLD = robot base，因此 T_world_cam = T_base_tcp @ T_tcp_cam。
+  # 文件中的 legacy base_cam1 块会被忽略。
+  handeye_convention: "wrist_cam2=T_tcp_cam"
 
-world_frame: "head_optical"
+world_frame: "robot_base"
 
 devices:
   sam2: "cuda"
@@ -44,11 +44,6 @@ sam2:
   offload_state_to_cpu: false
   cache_masks: true
 
-cam1:
-  initial_frames: 10
-  update_interval_frames: 30
-  max_integrations: 30
-
 keyframe:
   translation_m: 0.02
   rotation_deg: 5.0
@@ -64,7 +59,7 @@ tsdf:
   depth_max_m: 1.2
   weight_threshold: 3.0
 
-# Task 9：逐 cam2 关键帧 point-to-plane ICP 精配准（robot pose 为初值与回退）。
+# Task 9：逐 cam 关键帧 point-to-plane ICP 精配准（robot pose 为初值与回退）。
 # 默认关闭；先用 --icp true / --icp false 做 A/B，确认改善后再改 enabled。
 icp:
   enabled: false

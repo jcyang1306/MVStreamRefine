@@ -1,8 +1,8 @@
-"""Tasks 6-9 acceptance: dual-camera incremental reconstruction.
+"""Single wrist-camera incremental reconstruction in the robot-base frame.
 
-Runs the OfflinePipeline over the full sequence: cam1 (WORLD anchor) at low
-frequency plus cam2 keyframes at poses from robot kinematics, optionally
-refined per keyframe by point-to-plane ICP with safety fallback (Task 9).
+Runs the OfflinePipeline over the full sequence: camera keyframes at poses
+from robot kinematics, optionally refined per keyframe by point-to-plane ICP
+with safety fallback.
 A/B comparison (PLAN section 18): pass --icp true / --icp false to write
 results into <output.root>/run_icp_pose/ or run_robot_pose/. Exports:
     <output.root>/pointcloud/object_a.ply        final point cloud
@@ -12,7 +12,7 @@ results into <output.root>/run_icp_pose/ or run_robot_pose/. Exports:
     <output.root>/logs/run_*.log                 run log
 
 With visualization.enabled (and an X11 display for Docker) a live viewer
-shows the growing point cloud, cam frames and the cam2 trajectory
+shows the growing point cloud, robot-base frame and camera trajectory
 (SPACE pause, S save point cloud, M save mesh, Q quit). Use --no-viewer to
 force headless operation.
 
@@ -93,8 +93,8 @@ def main() -> int:
 
     source = OfflineFrameSource.from_config(config)
     cache = MaskCache(base_root / "masks")
-    if not cache.frames(1) or not cache.frames(2):
-        logger.error("mask cache incomplete under %s (need cam1/ and cam2/); "
+    if not cache.frames():
+        logger.error("mask cache is empty under %s (need cam/ or legacy cam2/); "
                      "run tools/precompute_masks.py first", cache.root)
         return 1
 
@@ -127,9 +127,8 @@ def main() -> int:
     stats = pipeline.run(source, cache, max_frames=args.max_frames)
 
     logger.info("frames processed:  %d", stats["frames_processed"])
-    logger.info("cam1 integrations: %d", stats["cam1_integrations"])
-    logger.info("cam2 keyframes:    %d (rejected %d)",
-                stats["cam2_keyframes"], stats["cam2_rejected"])
+    logger.info("keyframes:        %d (rejected %d)",
+                stats["keyframes"], stats["rejected"])
     if refiner is not None:
         logger.info("icp: accepted %d / fallback %d",
                     stats["icp_accepted"], stats["icp_fallback"])
@@ -151,9 +150,9 @@ def main() -> int:
                        "..." if len(stats["missing_mask_frames"]) > 10 else "")
     if stats["quit_requested"]:
         logger.info("stopped early by viewer quit; saving current state")
-    if stats["cam2_keyframes"] == 0:
-        logger.error("no cam2 keyframe was integrated; multi-view reconstruction "
-                     "did not happen (check masks / keyframe thresholds)")
+    if stats["keyframes"] == 0:
+        logger.error("no camera keyframe was integrated "
+                     "(check masks / keyframe thresholds)")
         return 1
 
     if bool(config["output"].get("save_debug", False)) and stats["debug_records"]:
