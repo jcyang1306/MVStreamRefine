@@ -167,11 +167,11 @@ docker compose -f compose.yaml -f compose.realtime.yaml run --rm reconstruction
 xhost -si:localuser:root
 ```
 
-当前镜像未包含 `pyrealsense2` / `Robotic_Arm` 时，第一次先装再跑：
+Dockerfile 已安装 `pyrealsense2` 和固定版本的 `Robotic_Arm==1.1.6`。
+更新代码后先重建镜像：
 
 ```bash
-docker compose -f compose.yaml -f compose.realtime.yaml run --rm reconstruction \
-  bash -lc 'python3 -m pip install -q pyrealsense2 && python3 tools/run_realtime_reconstruction.py --config configs/realtime.yaml'
+docker compose build reconstruction
 ```
 
 关掉 Open3D 点云窗口（只留 OpenCV 相机窗）：

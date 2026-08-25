@@ -6,8 +6,8 @@
 #   xhost -si:localuser:root
 #
 # Override the default command when needed, e.g. --no-viewer or pytest.
-# pyrealsense2 / Robotic_Arm are not in the base image; install them in the
-# container (or rebuild the image) before the first hardware run.
+# Dockerfile installs pyrealsense2 and the pinned RealMan SDK; rebuild the
+# image after dependency changes.
 
 services:
   reconstruction:

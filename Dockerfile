@@ -26,6 +26,13 @@ RUN python3 -m pip install --upgrade pip \
 COPY requirements.txt /workspace/requirements.txt
 RUN python3 -m pip install -r requirements.txt
 
+# Realtime hardware adapters. Pin the RealMan SDK so image rebuilds do not
+# silently change the robot API; pyrealsense2 provides the RealSense runtime.
+RUN python3 -m pip install \
+      "pyrealsense2>=2.54,<3" \
+      "Robotic_Arm==1.1.6" \
+ && python3 -c "import pyrealsense2; from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e; print('realtime hardware SDK imports OK')"
+
 COPY . /workspace
 RUN python3 -m pip install --no-deps -e .
 

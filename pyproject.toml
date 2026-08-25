@@ -17,8 +17,8 @@ dependencies = [
 test = ["pytest>=8"]
 # Hardware stack for the realtime pipeline (RealSense camera + RealMan arm).
 realtime = [
-  "pyrealsense2>=2.54",
-  "Robotic_Arm>=1.0",
+  "pyrealsense2>=2.54,<3",
+  "Robotic_Arm==1.1.6",
 ]
 
 [tool.setuptools]
