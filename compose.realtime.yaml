@@ -1,0 +1,30 @@
+# Overlay for live RealSense + RealMan reconstruction.
+# Does not replace compose.yaml: offline tools keep running without USB/X11.
+#
+#   xhost +si:localuser:root
+#   docker compose -f compose.yaml -f compose.realtime.yaml run --rm reconstruction
+#   xhost -si:localuser:root
+#
+# Override the default command when needed, e.g. --no-viewer or pytest.
+# pyrealsense2 / Robotic_Arm are not in the base image; install them in the
+# container (or rebuild the image) before the first hardware run.
+
+services:
+  reconstruction:
+    privileged: true
+    network_mode: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics,display
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/bus/usb:/dev/bus/usb
+      - ./tools:/workspace/tools:ro
+      - ./src/object_reconstruction:/workspace/src/object_reconstruction:ro
+      - ./configs:/workspace/configs:ro
+      - ./tests:/workspace/tests:ro
+    command:
+      - python3
+      - tools/run_realtime_reconstruction.py
+      - --config
+      - configs/realtime.yaml

@@ -225,6 +225,7 @@ pipeline/realtime_pipeline.py   状态机 PREVIEW / MASK_CONFIRM / RUNNING /
                                 PAUSED / LOST（UI 无关，可单测）
 tools/run_realtime_reconstruction.py   OpenCV 交互 + Open3D 增量 viewer
 configs/realtime.yaml           相机 SN、机械臂 IP、同步与跟踪阈值
+compose.realtime.yaml           实时 Docker overlay（USB / X11 / host 网络）
 ```
 
 硬件验收清单：

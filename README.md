@@ -157,14 +157,28 @@ mask 由 SAM 2.1 `StreamTracker` 逐帧跟踪。
 pip install -e ".[realtime]"   # pyrealsense2 + Robotic_Arm SDK
 ```
 
-启动（需要 X11、GPU、RealSense 与机械臂网络可达）：
+启动（需要 X11、GPU、RealSense 与机械臂网络可达）。USB、host 网络、
+DISPLAY 和代码挂载写在 `compose.realtime.yaml`，叠在离线 `compose.yaml` 上，
+不必每次手写长参数：
 
 ```bash
-docker compose run --rm \
-  -e DISPLAY="$DISPLAY" \
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  reconstruction \
-  python3 tools/run_realtime_reconstruction.py --config configs/realtime.yaml
+xhost +si:localuser:root
+docker compose -f compose.yaml -f compose.realtime.yaml run --rm reconstruction
+xhost -si:localuser:root
+```
+
+当前镜像未包含 `pyrealsense2` / `Robotic_Arm` 时，第一次先装再跑：
+
+```bash
+docker compose -f compose.yaml -f compose.realtime.yaml run --rm reconstruction \
+  bash -lc 'python3 -m pip install -q pyrealsense2 && python3 tools/run_realtime_reconstruction.py --config configs/realtime.yaml'
+```
+
+关掉 Open3D 点云窗口（只留 OpenCV 相机窗）：
+
+```bash
+docker compose -f compose.yaml -f compose.realtime.yaml run --rm reconstruction \
+  python3 tools/run_realtime_reconstruction.py --config configs/realtime.yaml --no-viewer
 ```
 
 OpenCV 窗口操作流程与热键：
