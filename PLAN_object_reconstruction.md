@@ -204,8 +204,36 @@ icp:
 - [x] ICP 可关闭且失败强制回退
 - [x] point cloud / mesh / debug / logging
 - [ ] 目标 Docker 中重新完成 transform、TSDF 与完整重建 smoke test
-- [ ] 接入实时 FrameSource
+- [x] 接入实时 FrameSource（代码完成，待硬件联调）
 - [ ] 性能优化（thread / queue / GPU / frame dropping）
+
+## 8.1 实时模块（已实现，待硬件验收）
+
+复用离线核心，新增：
+
+```text
+data/realsense_source.py        RealSense bgr8+z16 对齐采集，depth_scale 与
+                                depth.scale 一致性 fail-fast，host monotonic 时间戳
+data/robot_pose_source.py       RealMan TCP 位姿后台轮询线程（xyzrpy → T_base_tcp），
+                                带时间戳环形缓冲与 pose_at() 就近查询
+data/realtime_source.py         相机帧 + 就近机械臂位姿 → FramePacket；
+                                超过 sync.max_error_ms 的帧丢弃计数
+segmentation/sam2_stream_segmenter.py  SAM 2.1 StreamTracker 逐帧跟踪适配
+pipeline/reconstruction_engine.py      离线/实时共享的逐帧重建核心
+                                       （preprocess → keyframe → ICP → TSDF）
+pipeline/realtime_pipeline.py   状态机 PREVIEW / MASK_CONFIRM / RUNNING /
+                                PAUSED / LOST（UI 无关，可单测）
+tools/run_realtime_reconstruction.py   OpenCV 交互 + Open3D 增量 viewer
+configs/realtime.yaml           相机 SN、机械臂 IP、同步与跟踪阈值
+```
+
+硬件验收清单：
+
+- [ ] RealSense 出流、depth_scale 校验通过、内参合理
+- [ ] 机械臂位姿轮询稳定（read_failures 不增长），同步误差 < 50ms
+- [ ] ROI → SAM 跟踪 → 确认 → 积分全流程可用，帧率可接受
+- [ ] LOST 恢复与 N（新模型）行为正确
+- [ ] 导出的实时点云与离线结果量级一致
 
 ## 9. 后续路线
 

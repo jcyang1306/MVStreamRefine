@@ -143,3 +143,41 @@ docker compose run --rm reconstruction \
 结果分别写入 `output/run_robot_pose/` 与 `output/run_icp_pose/`。重点比较
 单相机多帧融合后的表面厚度、重影、边缘锐度和轨迹一致性；确认 ICP 改善
 后才应将 `icp.enabled` 设为 true。
+
+## 6. 实时重建（RealSense + RealMan）
+
+实时链路复用离线的重建核心（keyframe → optional ICP → TSDF），数据来源
+换成 RealSense 实时 RGB-D + 后台线程轮询的机械臂 TCP 位姿（按主机
+monotonic 时间戳就近同步，超过 `realtime.sync.max_error_ms` 的帧被丢弃），
+mask 由 SAM 2.1 `StreamTracker` 逐帧跟踪。
+
+硬件依赖（在目标机上安装）：
+
+```bash
+pip install -e ".[realtime]"   # pyrealsense2 + Robotic_Arm SDK
+```
+
+启动（需要 X11、GPU、RealSense 与机械臂网络可达）：
+
+```bash
+docker compose run --rm \
+  -e DISPLAY="$DISPLAY" \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  reconstruction \
+  python3 tools/run_realtime_reconstruction.py --config configs/realtime.yaml
+```
+
+OpenCV 窗口操作流程与热键：
+
+1. `B` 拖框选择物体 ROI（进入 MASK_CONFIRM，红色叠加为 SAM 跟踪 mask）
+2. `R` 确认 mask，开始积分（RUNNING）
+3. `P` 暂停/恢复积分（暂停期间继续跟踪，不会丢失物体）
+4. `C` 清除跟踪保留模型；`N` 丢弃模型重新开始
+5. `S` 保存点云快照；`Q`/`ESC` 退出并导出
+
+mask 面积连续 `realtime.tracking.lost_after_frames` 帧低于
+`min_mask_area_px` 时进入 LOST，需要重新按 `B` 选择 ROI（模型保留）。
+Open3D viewer 每 `visualization.update_every_keyframes` 个关键帧刷新一次
+增量点云。相机序列号、机械臂 IP、同步阈值等见 `configs/realtime.yaml`。
+
+输出与离线一致，位于 `output/realtime/`。

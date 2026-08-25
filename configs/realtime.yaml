@@ -1,0 +1,89 @@
+# Realtime single wrist-camera reconstruction (RealSense + RealMan arm).
+# Shares depth/mask/keyframe/tsdf/icp conventions with configs/offline.yaml.
+
+realtime:
+  camera:
+    # Wrist RealSense (calibration project: SN 323622271240, 1280x720 @ 30).
+    serial: "323622271240"
+    width: 1280
+    height: 720
+    fps: 30
+    warmup_frames: 30
+  robot:
+    ip: "192.168.1.19"
+    port: 8080
+    poll_hz: 50
+    buffer_size: 1024
+  sync:
+    # Drop a camera frame when no buffered robot pose is closer than this.
+    max_error_ms: 50.0
+  tracking:
+    # StreamTracker bounded memory (frames kept for SAM2 temporal attention).
+    memory_frames: 16
+    # LOST when the tracked mask stays below this area for N consecutive frames.
+    min_mask_area_px: 500
+    lost_after_frames: 10
+
+calibration:
+  handeye_path: "./data/handeye/handeye_tf.txt"
+  # Same confirmed conventions as offline: TCP pose is T_base_tcp
+  # (realtime reads xyzrpy from rm_get_current_arm_state), handeye label
+  # wrist_cam2 means T_tcp_cam, WORLD = robot base.
+  pose_semantics: "T_base_tcp"
+  quaternion_order: "xyzw"
+  handeye_convention: "wrist_cam2=T_tcp_cam"
+
+world_frame: "robot_base"
+
+devices:
+  sam2: "cuda"
+  tsdf: "CPU:0"
+
+depth:
+  # RealSense z16 raw units; device depth_scale must equal 1/scale (checked at start).
+  scale: 1000.0
+  min_m: 0.15
+  max_m: 1.2
+
+mask:
+  erosion_px: 3
+  min_area_px: 1000
+
+sam2:
+  checkpoint: "/models/sam2.1_hiera_tiny.pt"
+  model_type: "tiny"
+  object_id: 1
+
+keyframe:
+  translation_m: 0.02
+  rotation_deg: 5.0
+  min_mask_area_px: 1000
+  min_valid_depth_ratio: 0.7
+
+tsdf:
+  device: "CPU:0"
+  voxel_size_m: 0.002
+  block_resolution: 16
+  block_count: 50000
+  trunc_voxel_multiplier: 4.0
+  depth_max_m: 1.2
+  weight_threshold: 3.0
+
+icp:
+  enabled: false
+  max_correspondence_distance_m: 0.01
+  min_fitness: 0.4
+  max_rmse_m: 0.008
+  max_translation_correction_m: 0.02
+  max_rotation_correction_deg: 5.0
+  voxel_downsample_m: 0.004
+  max_iterations: 30
+
+visualization:
+  enabled: true
+  update_every_keyframes: 2
+
+output:
+  root: "./output/realtime"
+  save_keyframes: true
+  save_debug: true

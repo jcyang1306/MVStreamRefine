@@ -29,6 +29,9 @@ class NullViewer:
     def update(self, point_cloud: Any, T_world_cam: np.ndarray) -> bool:
         return True
 
+    def poll(self) -> bool:
+        return True
+
     def close(self) -> None:
         pass
 
@@ -125,6 +128,11 @@ class LiveViewer:
         self._pump()
         while self._paused and not self._quit:
             self._pump()
+        return not self._quit
+
+    def poll(self) -> bool:
+        """Pump window events without new geometry (realtime loop); False = quit."""
+        self._pump()
         return not self._quit
 
     def _pump(self) -> None:
