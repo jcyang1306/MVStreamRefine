@@ -7,9 +7,9 @@ T_base_tcp) pairs on the host ``time.monotonic_ns()`` clock - the same clock
 RealSenseSource stamps frames with - so ``pose_at`` can pick the nearest pose
 for any camera frame and reject it when the gap exceeds ``max_error_ms``.
 
-The poller takes any ``read_pose() -> 4x4`` callable, keeping it unit-testable
-without hardware; ``connect_realman_arm`` builds the real one (lazy import of
-the Robotic_Arm SDK).
+``RealManRobot`` owns the SDK connection and exposes read + motion commands.
+The poller still takes any ``read_pose() -> 4x4`` callable, keeping it
+unit-testable without hardware. The SDK is imported lazily on connection.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
@@ -50,31 +50,136 @@ def xyzrpy_to_matrix(pose: np.ndarray) -> np.ndarray:
     return T
 
 
-def connect_realman_arm(
-    ip: str = "192.168.1.19", port: int = 8080
-) -> Callable[[], np.ndarray]:
-    """Connect to the RealMan arm; returns read_pose() -> T_base_tcp (4x4)."""
-    try:
-        from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
-    except ImportError as exc:
-        raise RuntimeError(
-            "the Robotic_Arm SDK is not installed; the realtime pipeline needs "
-            "it to read the TCP pose (pip install Robotic_Arm)"
-        ) from exc
+class RealManRobot:
+    """RealMan connection shared by pose polling and Cartesian motion control."""
 
-    arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
-    handle = arm.rm_create_robot_arm(ip, port)
-    if handle.id <= 0:
-        raise RuntimeError(f"failed to connect RealMan arm at {ip}:{port}")
-    logger.info("RealMan arm connected %s:%d handle.id=%d", ip, port, handle.id)
+    def __init__(self, arm: Any, handle: Any, ip: str, port: int) -> None:
+        if int(handle.id) <= 0:
+            raise RuntimeError(f"failed to connect RealMan arm at {ip}:{port}")
+        self._arm = arm
+        self._handle = handle
+        self.ip = str(ip)
+        self.port = int(port)
+        self.motion_active = False
+        self.paused = False
+        self.closed = False
 
-    def read_pose() -> np.ndarray:
-        ret, state = arm.rm_get_current_arm_state()
+    @classmethod
+    def connect(
+        cls, ip: str = "192.168.1.19", port: int = 8080
+    ) -> "RealManRobot":
+        try:
+            from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
+        except ImportError as exc:
+            raise RuntimeError(
+                "the Robotic_Arm SDK is not installed; the realtime pipeline needs "
+                "it to read and control the arm (pip install Robotic_Arm)"
+            ) from exc
+
+        arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
+        handle = arm.rm_create_robot_arm(ip, int(port))
+        robot = cls(arm, handle, ip, int(port))
+        logger.info(
+            "RealMan arm connected %s:%d handle.id=%d", ip, port, handle.id
+        )
+        return robot
+
+    def _ensure_open(self) -> None:
+        if self.closed:
+            raise RuntimeError("RealMan arm connection is closed")
+
+    @staticmethod
+    def _check_code(operation: str, code: int) -> None:
+        if int(code) != 0:
+            raise RuntimeError(f"{operation} failed: ret={code}")
+
+    def read_pose(self) -> np.ndarray:
+        """Read current TCP pose as T_base_tcp."""
+        self._ensure_open()
+        ret, state = self._arm.rm_get_current_arm_state()
         if ret != 0:
             raise RuntimeError(f"rm_get_current_arm_state failed: ret={ret}")
         return xyzrpy_to_matrix(np.asarray(state["pose"], dtype=np.float64))
 
-    return read_pose
+    def move_linear(
+        self,
+        pose_xyzrpy: Sequence[float],
+        *,
+        velocity: int,
+        blend_radius: int = 0,
+        blocking: bool,
+    ) -> None:
+        """Send rm_movel; pose units are metres + radians."""
+        self._ensure_open()
+        pose = np.asarray(pose_xyzrpy, dtype=np.float64)
+        if pose.shape != (6,) or not np.isfinite(pose).all():
+            raise ValueError("linear target pose must be six finite xyzrpy values")
+        if not 1 <= int(velocity) <= 100:
+            raise ValueError("velocity must be in [1, 100]")
+        if not 0 <= int(blend_radius) <= 100:
+            raise ValueError("blend_radius must be in [0, 100]")
+        self.motion_active = True
+        self.paused = False
+        try:
+            code = self._arm.rm_movel(
+                pose.tolist(),
+                v=int(velocity),
+                r=int(blend_radius),
+                connect=0,
+                block=1 if blocking else 0,
+            )
+            self._check_code("rm_movel", code)
+        except Exception:
+            self.motion_active = False
+            raise
+        # A blocking move has already completed when the call returns.
+        if blocking:
+            self.motion_active = False
+
+    def pause(self) -> None:
+        self._ensure_open()
+        if not self.motion_active or self.paused:
+            return
+        self._check_code("rm_set_arm_pause", self._arm.rm_set_arm_pause())
+        self.paused = True
+
+    def resume(self) -> None:
+        self._ensure_open()
+        if not self.motion_active or not self.paused:
+            return
+        self._check_code("rm_set_arm_continue", self._arm.rm_set_arm_continue())
+        self.paused = False
+
+    def stop(self) -> None:
+        self._ensure_open()
+        if not self.motion_active:
+            return
+        self._check_code("rm_set_arm_stop", self._arm.rm_set_arm_stop())
+        self.motion_active = False
+        self.paused = False
+
+    def mark_arrived(self) -> None:
+        """Update local command state after external pose-based arrival detection."""
+        self.motion_active = False
+        self.paused = False
+
+    def close(self) -> None:
+        """Delete the SDK connection; safe to call more than once."""
+        if self.closed:
+            return
+        code = self._arm.rm_delete_robot_arm()
+        if int(code) != 0:
+            logger.warning("rm_delete_robot_arm failed: ret=%s", code)
+        self.closed = True
+        self.motion_active = False
+        self.paused = False
+
+
+def connect_realman_arm(
+    ip: str = "192.168.1.19", port: int = 8080
+) -> RealManRobot:
+    """Connect to the RealMan arm and return its shared controller."""
+    return RealManRobot.connect(ip, port)
 
 
 @dataclass

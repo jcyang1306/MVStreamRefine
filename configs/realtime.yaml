@@ -14,6 +14,19 @@ realtime:
     port: 8080
     poll_hz: 50
     buffer_size: 1024
+    motion:
+      # Safety default: fill and verify both xyzrpy poses on the target robot
+      # before changing this to true. Position units: metres; angles: radians.
+      enabled: false
+      initial_pose: null
+      final_pose: null
+      velocity: 10
+      # rm_movel connect=0 executes immediately, so blending is normally zero.
+      blend_radius: 0
+      position_tolerance_m: 0.008
+      rotation_tolerance_deg: 2.0
+      # Require several synchronized pose samples inside both tolerances.
+      stable_frames: 3
   sync:
     # Drop a camera frame when no buffered robot pose is closer than this.
     max_error_ms: 50.0

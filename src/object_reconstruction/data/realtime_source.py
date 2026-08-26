@@ -86,7 +86,11 @@ class RealtimeFrameSource:
 
     def start(self) -> None:
         self.camera.start()
-        self.pose_poller.start()
+        try:
+            self.pose_poller.start()
+        except Exception:
+            self.camera.stop()
+            raise
 
     def stop(self) -> None:
         self.pose_poller.stop()

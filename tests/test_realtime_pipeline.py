@@ -75,6 +75,16 @@ def make_pipeline(segmenter=None):
     return RealtimePipeline(FakeEngine, segmenter or FakeSegmenter(), CONFIG)
 
 
+def make_motion_pipeline(segmenter=None):
+    config = {
+        "realtime": {
+            "tracking": {"min_mask_area_px": 100, "lost_after_frames": 3},
+            "robot": {"motion": {"enabled": True}},
+        }
+    }
+    return RealtimePipeline(FakeEngine, segmenter or FakeSegmenter(), config)
+
+
 def test_preview_does_not_track_or_integrate():
     pipeline = make_pipeline()
     output = pipeline.process(make_packet())
@@ -103,6 +113,42 @@ def test_roi_confirm_run_cycle():
     assert output.state == State.RUNNING
     assert output.engine_result.integrated
     assert pipeline.engine.processed == [1]
+
+
+def test_motion_mode_requires_g_after_mask_confirmation():
+    pipeline = make_motion_pipeline()
+    pipeline.set_roi(np.zeros((HEIGHT, WIDTH, 3), np.uint8), (1, 2, 30, 40))
+    assert "press G" in pipeline.handle_key("r")
+    assert pipeline.state == State.READY
+
+    output = pipeline.process(make_packet(0))
+    assert output.mask is not None and output.engine_result is None
+    assert pipeline.engine.processed == []
+
+    assert "integrating" in pipeline.start_integration()
+    output = pipeline.process(make_packet(1))
+    assert output.state == State.RUNNING
+    assert output.engine_result.integrated
+    assert pipeline.engine.processed == [1]
+
+
+def test_explicit_g_start_is_rejected_in_wrong_mode_or_state():
+    with pytest.raises(RuntimeError, match="only valid"):
+        make_pipeline().start_integration()
+    pipeline = make_motion_pipeline()
+    with pytest.raises(RuntimeError, match="PREVIEW"):
+        pipeline.start_integration()
+
+
+def test_motion_mode_r_cannot_resume_robot_pause():
+    pipeline = make_motion_pipeline()
+    pipeline.set_roi(np.zeros((HEIGHT, WIDTH, 3), np.uint8), (0, 0, 8, 8))
+    pipeline.handle_key("r")
+    pipeline.start_integration()
+    pipeline.handle_key("p")
+    assert pipeline.state == State.PAUSED
+    assert "press P" in pipeline.handle_key("r")
+    assert pipeline.state == State.PAUSED
 
 
 def test_pause_keeps_tracking_without_integration():

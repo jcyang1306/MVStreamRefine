@@ -6,9 +6,11 @@ and every accepted keyframe is fused into the shared TSDF engine (optional
 ICP refinement). The Open3D viewer shows the growing model.
 
 OpenCV window hotkeys:
+    I  move to configured initial pose (robot-motion mode)
     B  select / reselect the object ROI (drag, Enter/Space confirm)
-    R  confirm the mask and start integrating / resume
-    P  pause integration (tracking continues)
+    R  confirm the mask
+    G  move to final pose and start integrating
+    P  pause / resume both robot motion and integration
     C  clear tracking, keep the model            N  start a new model
     S  save a point-cloud snapshot               Q / ESC  quit and export
 
@@ -39,6 +41,11 @@ from object_reconstruction.data.robot_pose_source import (
 from object_reconstruction.fusion.keyframe_selector import KeyframeSelector
 from object_reconstruction.pipeline.realtime_pipeline import RealtimePipeline, State
 from object_reconstruction.pipeline.reconstruction_engine import ReconstructionEngine
+from object_reconstruction.pipeline.robot_motion_controller import (
+    MotionConfig,
+    MotionState,
+    RobotMotionController,
+)
 from object_reconstruction.segmentation.sam2_stream_segmenter import SAM2StreamSegmenter
 from object_reconstruction.utils.config import load_config
 from object_reconstruction.utils.logging import setup_logging
@@ -50,6 +57,7 @@ WINDOW = "MVStreamRefine realtime - object A"
 _STATE_COLORS = {
     State.PREVIEW: (200, 200, 200),
     State.MASK_CONFIRM: (0, 255, 255),
+    State.READY: (255, 255, 0),
     State.RUNNING: (0, 255, 0),
     State.PAUSED: (0, 165, 255),
     State.LOST: (0, 0, 255),
@@ -94,7 +102,10 @@ def build_viewer(config: dict, output_root: Path, no_viewer: bool, pipeline):
                       window_name="MVStreamRefine realtime - model")
 
 
-def draw_overlay(cv2, packet, output, source, pipeline, fps: float, message: str):
+def draw_overlay(
+    cv2, packet, output, source, pipeline, fps: float, message: str,
+    motion: RobotMotionController | None = None,
+):
     import numpy as np
 
     bgr = np.ascontiguousarray(packet.cam.rgb[:, :, ::-1])
@@ -110,8 +121,25 @@ def draw_overlay(cv2, packet, output, source, pipeline, fps: float, message: str
         f"mask={output.mask_area_px}px  fps={fps:.1f}",
         f"sync={sync}  dropped={source.frames_dropped_sync}  "
         f"pose_err={source.pose_poller.read_failures}",
-        "B roi  R run  P pause  C clear  N new  S save  Q quit",
     ]
+    if motion is not None and motion.config.enabled:
+        pos = (
+            f"{motion.position_error_m * 1000:.1f}mm"
+            if motion.position_error_m is not None else "-"
+        )
+        rot = (
+            f"{motion.rotation_error_deg:.2f}deg"
+            if motion.rotation_error_deg is not None else "-"
+        )
+        lines.extend(
+            [
+                f"motion={motion.state.value}  final_error={pos}/{rot}",
+                "I start  B roi  R confirm  G scan  P pause  "
+                "C clear  N new  S save  Q quit",
+            ]
+        )
+    else:
+        lines.append("B roi  R run  P pause  C clear  N new  S save  Q quit")
     if message:
         lines.append(message)
     for i, line in enumerate(lines):
@@ -171,31 +199,48 @@ def main() -> int:
 
     import cv2
 
-    robot_cfg = config["realtime"]["robot"]
-    read_pose = connect_realman_arm(robot_cfg["ip"], int(robot_cfg["port"]))
-    poller = RobotPosePoller.from_config(config, read_pose)
-    camera = RealSenseSource.from_config(config)
-    source = RealtimeFrameSource.from_config(config, camera, poller)
-
-    pipeline = RealtimePipeline(
-        engine_factory=make_engine_factory(config, icp_enabled),
-        segmenter=SAM2StreamSegmenter.from_config(config),
-        config=config,
+    motion_config = MotionConfig.from_config(config)
+    update_every = max(
+        1, int(config.get("visualization", {}).get("update_every_keyframes", 2))
     )
-    viewer = build_viewer(config, output_root, args.no_viewer, pipeline)
-    update_every = max(1, int(config.get("visualization", {})
-                              .get("update_every_keyframes", 2)))
     save_debug = bool(config["output"].get("save_debug", False))
 
+    robot = None
+    source = None
+    viewer = None
+    pipeline = None
+    motion = None
+    source_started = False
+    window_created = False
     debug_records: list[dict] = []
     shown_keyframes = 0
     fps, fps_t0, fps_n = 0.0, time.monotonic(), 0
     message = ""
 
-    source.start()
-    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
-    logger.info("realtime loop started; press B to select the object")
     try:
+        robot_cfg = config["realtime"]["robot"]
+        robot = connect_realman_arm(robot_cfg["ip"], int(robot_cfg["port"]))
+        poller = RobotPosePoller.from_config(config, robot.read_pose)
+        camera = RealSenseSource.from_config(config)
+        source = RealtimeFrameSource.from_config(config, camera, poller)
+        pipeline = RealtimePipeline(
+            engine_factory=make_engine_factory(config, icp_enabled),
+            segmenter=SAM2StreamSegmenter.from_config(config),
+            config=config,
+        )
+        motion = RobotMotionController(robot, motion_config)
+        viewer = build_viewer(config, output_root, args.no_viewer, pipeline)
+
+        source.start()
+        source_started = True
+        cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+        window_created = True
+        if motion_config.enabled:
+            logger.info("realtime motion mode: press I to move to the start pose")
+        else:
+            logger.info("realtime passive mode: press B to select the object")
+
+        finished = False
         while True:
             packet = source.read_packet()
             if not viewer.poll():
@@ -210,6 +255,20 @@ def main() -> int:
             output = pipeline.process(packet)
             if output.message:
                 message = output.message
+            if (
+                motion_config.enabled
+                and motion.state == MotionState.ERROR
+                and motion.last_error
+            ):
+                message = f"robot motion error: {motion.last_error}"
+            if (
+                motion_config.enabled
+                and output.state == State.LOST
+                and motion.state == MotionState.SCANNING
+            ):
+                motion.pause()
+                message = "tracking lost; robot and integration paused, press B"
+                logger.warning(message)
             result = output.engine_result
             if result is not None and result.integrated:
                 debug_records.append(result.debug_record)
@@ -221,22 +280,97 @@ def main() -> int:
                     if not viewer.update(pipeline.engine.tsdf.extract_point_cloud(),
                                          packet.T_world_cam):
                         break
+            if motion_config.enabled and motion.update_pose(packet.tcp_pose):
+                if pipeline.state == State.RUNNING:
+                    pipeline.handle_key("p")
+                message = "final pose reached; reconstruction complete"
+                logger.info(message)
+                finished = True
 
             fps_n += 1
             if (now := time.monotonic()) - fps_t0 >= 1.0:
                 fps, fps_t0, fps_n = fps_n / (now - fps_t0), now, 0
 
-            cv2.imshow(WINDOW, draw_overlay(cv2, packet, output, source,
-                                            pipeline, fps, message))
+            cv2.imshow(
+                WINDOW,
+                draw_overlay(
+                    cv2, packet, output, source, pipeline, fps, message, motion
+                ),
+            )
             key = cv2.waitKey(1) & 0xFF
+            if finished:
+                break
             if key in (ord("q"), 27):
                 break
-            if key == ord("b"):
+            if key == ord("i"):
+                if not motion_config.enabled:
+                    message = "I ignored: robot motion is disabled"
+                elif pipeline.state != State.PREVIEW:
+                    message = "clear/reset tracking before moving to start"
+                else:
+                    try:
+                        motion.move_to_start()
+                        message = "moving to configured initial pose"
+                    except (RuntimeError, ValueError) as exc:
+                        message = str(exc)
+                        logger.error("start move rejected: %s", exc)
+            elif key == ord("b"):
+                if (
+                    motion_config.enabled
+                    and motion.state
+                    not in (MotionState.AT_START, MotionState.PAUSED)
+                ):
+                    message = "press I and wait for AT_START before selecting ROI"
+                    continue
                 box = select_roi(cv2, packet)
                 message = ("ROI cancelled" if box is None else
                            f"ROI {tuple(int(v) for v in box)}; confirm with R")
                 if box is not None:
                     pipeline.set_roi(packet.cam.rgb, box)
+            elif key == ord("g"):
+                if not motion_config.enabled:
+                    message = "G ignored: robot motion is disabled"
+                elif pipeline.state != State.READY:
+                    message = "confirm a valid mask with R before pressing G"
+                else:
+                    try:
+                        motion.start_scan()
+                        message = pipeline.start_integration()
+                    except (RuntimeError, ValueError) as exc:
+                        message = str(exc)
+                        logger.error("scan start rejected: %s", exc)
+                        if robot.motion_active:
+                            robot.stop()
+            elif key == ord("p") and motion_config.enabled:
+                try:
+                    if (
+                        pipeline.state == State.RUNNING
+                        and motion.state == MotionState.SCANNING
+                    ):
+                        motion.pause()
+                        message = pipeline.handle_key("p") or "paused"
+                    elif (
+                        pipeline.state == State.PAUSED
+                        and motion.state == MotionState.PAUSED
+                    ):
+                        motion.resume()
+                        message = pipeline.handle_key("p") or "resumed"
+                    else:
+                        message = (
+                            f"cannot toggle pause in "
+                            f"{pipeline.state.value}/{motion.state.value}"
+                        )
+                except RuntimeError as exc:
+                    message = str(exc)
+                    logger.error("pause/resume failed: %s", exc)
+            elif key == ord("c"):
+                if motion_config.enabled and motion.state == MotionState.SCANNING:
+                    motion.pause()
+                message = pipeline.handle_key("c") or "tracking cleared"
+            elif key == ord("n"):
+                if motion_config.enabled:
+                    motion.stop()
+                message = pipeline.handle_key("n") or "new model"
             elif key == ord("s"):
                 if pipeline.engine.keyframes > 0:
                     path = (output_root / "pointcloud"
@@ -248,10 +382,44 @@ def main() -> int:
                     message = msg
                     logger.info("%s", msg)
     finally:
-        source.stop()
-        cv2.destroyAllWindows()
-        viewer.close()
+        if motion is not None and motion.state not in (
+            MotionState.DISABLED,
+            MotionState.IDLE,
+            MotionState.FINISHED,
+        ):
+            try:
+                motion.stop()
+                motion.wait_for_start()
+            except Exception as exc:
+                logger.error("failed to stop robot during cleanup: %s", exc)
+        if source_started and source is not None:
+            try:
+                source.stop()
+            except Exception as exc:
+                logger.error("failed to stop realtime source: %s", exc)
+        if window_created:
+            try:
+                cv2.destroyAllWindows()
+            except Exception as exc:
+                logger.error("failed to close OpenCV windows: %s", exc)
+        if viewer is not None:
+            try:
+                viewer.close()
+            except Exception as exc:
+                logger.error("failed to close Open3D viewer: %s", exc)
+        if pipeline is not None:
+            try:
+                pipeline.segmenter.reset()
+            except Exception as exc:
+                logger.error("failed to reset SAM2 tracker: %s", exc)
+        if robot is not None:
+            try:
+                robot.close()
+            except Exception as exc:
+                logger.error("failed to close robot connection: %s", exc)
 
+    if pipeline is None or source is None:
+        return 1
     logger.info("frames seen: %d  keyframes: %d  sync drops: %d",
                 pipeline.frames_seen, pipeline.engine.keyframes,
                 source.frames_dropped_sync)

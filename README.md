@@ -181,13 +181,36 @@ docker compose -f compose.yaml -f compose.realtime.yaml run --rm reconstruction 
   python3 tools/run_realtime_reconstruction.py --config configs/realtime.yaml --no-viewer
 ```
 
-OpenCV 窗口操作流程与热键：
+### 机械臂自动运动
 
-1. `B` 拖框选择物体 ROI（进入 MASK_CONFIRM，红色叠加为 SAM 跟踪 mask）
-2. `R` 确认 mask，开始积分（RUNNING）
-3. `P` 暂停/恢复积分（暂停期间继续跟踪，不会丢失物体）
-4. `C` 清除跟踪保留模型；`N` 丢弃模型重新开始
-5. `S` 保存点云快照；`Q`/`ESC` 退出并导出
+`configs/realtime.yaml` 中的 `realtime.robot.motion.enabled` 默认是 false，
+因此新镜像仍先按被动模式运行。启用前必须在真实工位确认两个六维
+`[x,y,z,rx,ry,rz]` 位姿（米、弧度）、速度、碰撞空间和急停：
+
+```yaml
+motion:
+  enabled: true
+  initial_pose: [x0, y0, z0, rx0, ry0, rz0]
+  final_pose: [x1, y1, z1, rx1, ry1, rz1]
+  velocity: 10
+```
+
+自动运动模式的 OpenCV 操作顺序：
+
+1. `I`：后台阻塞移动到 initial_pose；overlay 变为 `AT_START` 后继续。
+2. `B`：拖框选择物体 ROI（红色叠加为 SAM mask）。
+3. `R`：确认 mask，状态变为 READY，但机械臂和积分仍未启动。
+4. `G`：非阻塞移动到 final_pose，同时开始 TSDF 积分。
+5. `P`：同时暂停/恢复机械臂轨迹与积分；SAM 跟踪继续。
+6. `C`：暂停运动、清跟踪但保留模型；重新 B/R/G 后继续原轨迹。
+7. `N`：停止轨迹并丢弃模型；需要重新从 I 开始。
+8. `S`：保存点云快照；`Q`/`ESC` 停止活动轨迹、退出并导出。
+
+连续 `stable_frames` 个同步 pose 同时满足平移/旋转终点容差后，程序自动
+结束积分并导出。mask 连续低于面积门限而进入 LOST 时，机械臂和积分会
+自动暂停，重新 `B`、`R`、`G` 后恢复。
+
+motion 禁用时维持原操作：`B` 选 ROI，`R` 直接开始积分，`P` 仅控制积分。
 
 mask 面积连续 `realtime.tracking.lost_after_frames` 帧低于
 `min_mask_area_px` 时进入 LOST，需要重新按 `B` 选择 ROI（模型保留）。

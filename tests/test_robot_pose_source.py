@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from object_reconstruction.data.robot_pose_source import (
+    RealManRobot,
     RobotPosePoller,
     TimedPose,
     xyzrpy_to_matrix,
@@ -104,3 +105,91 @@ def test_double_start_is_rejected():
             poller.start()
     finally:
         poller.stop()
+
+
+class FakeHandle:
+    id = 7
+
+
+class FakeSDKArm:
+    def __init__(self):
+        self.pose = [0.1, -0.2, 0.3, 0.0, 0.0, 0.0]
+        self.moves = []
+        self.pause_calls = 0
+        self.resume_calls = 0
+        self.stop_calls = 0
+        self.delete_calls = 0
+        self.move_code = 0
+
+    def rm_get_current_arm_state(self):
+        return 0, {"pose": self.pose}
+
+    def rm_movel(self, pose, **kwargs):
+        self.moves.append((pose, kwargs))
+        return self.move_code
+
+    def rm_set_arm_pause(self):
+        self.pause_calls += 1
+        return 0
+
+    def rm_set_arm_continue(self):
+        self.resume_calls += 1
+        return 0
+
+    def rm_set_arm_stop(self):
+        self.stop_calls += 1
+        return 0
+
+    def rm_delete_robot_arm(self):
+        self.delete_calls += 1
+        return 0
+
+
+def test_realman_robot_read_and_motion_commands():
+    sdk = FakeSDKArm()
+    robot = RealManRobot(sdk, FakeHandle(), "192.168.1.19", 8080)
+    T = robot.read_pose()
+    np.testing.assert_allclose(T[:3, 3], [0.1, -0.2, 0.3])
+
+    target = [0.2, -0.3, 0.4, 0.1, 0.2, 0.3]
+    robot.move_linear(target, velocity=10, blend_radius=0, blocking=False)
+    assert robot.motion_active
+    assert sdk.moves == [
+        (
+            target,
+            {"v": 10, "r": 0, "connect": 0, "block": 0},
+        )
+    ]
+    robot.pause()
+    assert robot.paused and sdk.pause_calls == 1
+    robot.resume()
+    assert not robot.paused and sdk.resume_calls == 1
+    robot.stop()
+    assert not robot.motion_active and sdk.stop_calls == 1
+
+    robot.close()
+    robot.close()
+    assert sdk.delete_calls == 1
+    with pytest.raises(RuntimeError, match="closed"):
+        robot.read_pose()
+
+
+def test_realman_robot_blocking_move_and_validation():
+    sdk = FakeSDKArm()
+    robot = RealManRobot(sdk, FakeHandle(), "host", 8080)
+    robot.move_linear(np.zeros(6), velocity=1, blend_radius=100, blocking=True)
+    assert not robot.motion_active
+    assert sdk.moves[0][1]["block"] == 1
+    with pytest.raises(ValueError, match="six finite"):
+        robot.move_linear([1, 2], velocity=10, blocking=False)
+    with pytest.raises(ValueError, match="velocity"):
+        robot.move_linear(np.zeros(6), velocity=0, blocking=False)
+
+
+def test_realman_robot_raises_on_sdk_error():
+    sdk = FakeSDKArm()
+    sdk.move_code = 5
+    robot = RealManRobot(sdk, FakeHandle(), "host", 8080)
+    with pytest.raises(RuntimeError, match="rm_movel failed"):
+        robot.move_linear(np.zeros(6), velocity=10, blocking=False)
+    assert not robot.motion_active

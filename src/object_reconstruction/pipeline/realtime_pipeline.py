@@ -4,6 +4,8 @@ States:
     PREVIEW       live view only; waiting for an ROI (key B in the UI)
     MASK_CONFIRM  SAM2 tracks the prompted object; user confirms (R) or
                   reselects (B) - nothing is integrated yet
+    READY         motion mode only: mask confirmed; waiting for G to start
+                  the robot scan and TSDF integration
     RUNNING       every synchronized frame is tracked and fed to the shared
                   ReconstructionEngine (keyframe gate -> optional ICP -> TSDF)
     PAUSED        tracking continues so the object is not lost; integration
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 class State(str, Enum):
     PREVIEW = "PREVIEW"
     MASK_CONFIRM = "MASK_CONFIRM"
+    READY = "READY"
     RUNNING = "RUNNING"
     PAUSED = "PAUSED"
     LOST = "LOST"
@@ -68,6 +71,12 @@ class RealtimePipeline:
         tracking = config.get("realtime", {}).get("tracking", {})
         self.min_track_area_px = int(tracking.get("min_mask_area_px", 500))
         self.lost_after_frames = int(tracking.get("lost_after_frames", 10))
+        self.motion_enabled = bool(
+            config.get("realtime", {})
+            .get("robot", {})
+            .get("motion", {})
+            .get("enabled", False)
+        )
 
         self.state = State.PREVIEW
         self._low_area_streak = 0
@@ -91,9 +100,14 @@ class RealtimePipeline:
         key = key.lower()
         if key == "r":
             if self.state == State.MASK_CONFIRM:
+                if self.motion_enabled:
+                    self.state = State.READY
+                    return "mask confirmed; press G to move and integrate"
                 self.state = State.RUNNING
                 return "mask confirmed; integrating"
             if self.state == State.PAUSED:
+                if self.motion_enabled:
+                    return "press P to resume robot motion and integration"
                 self.state = State.RUNNING
                 return "resumed"
         elif key == "p":
@@ -115,6 +129,15 @@ class RealtimePipeline:
             self.state = State.PREVIEW
             return "new model started (TSDF + keyframe state reset)"
         return None
+
+    def start_integration(self) -> str:
+        """Start integration after G in configured robot-motion mode."""
+        if not self.motion_enabled:
+            raise RuntimeError("explicit G start is only valid when motion is enabled")
+        if self.state != State.READY:
+            raise RuntimeError(f"cannot start integration from {self.state.value}")
+        self.state = State.RUNNING
+        return "robot scan started; integrating"
 
     # -- per-frame processing ----------------------------------------------------
 
