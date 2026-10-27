@@ -11,4 +11,24 @@
 #   gt: constant_T_base_obj
 #   object: <name>
 #   used_by: [P0-gate, I0, I2]
-[]
+- session_id: 20261027T103359_CW20175_9605
+  manifest_sha256: f0d274b8b97558a0364758ed9d4c9b37c6e3038f678f1e40035500e302308432
+  cameras:
+  - wrist
+  scenario:
+  - SMOKE
+  gt: null
+  object: cup
+  used_by:
+  - P0-gate
+- session_id: 20261027T105934_CW20175_f4d5
+  manifest_sha256: 051545a95fa6dfed20cc7f0f23c11d8adaa6c85ca4376c63bf577666e33b1724
+  cameras:
+  - head
+  - wrist
+  scenario:
+  - R-STATIC
+  gt: constant_T_base_obj
+  object: cup
+  used_by:
+  - P0-gate

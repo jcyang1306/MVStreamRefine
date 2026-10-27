@@ -31,7 +31,7 @@ Foundation plus the data recorder (ADR-0007): transform math, contract types, se
 ## Gate (I-P0) — needs owner-recorded sessions
 Code is complete first; the owner then records on the rig:
 1. **SMOKE**: 60 s, wrist only, object static, robot moved by the operator.
-2. **R-STATIC**: 2 min, wrist 30 fps + head 15 fps, object static, robot moved through varied viewpoints.
+2. **R-STATIC**: 30 s, wrist 30 fps + head 15 fps, object static, robot moved through varied viewpoints.
 3. (Recommended, feeds P1) **R-CALIB**: 11×8 checkerboard static, robot moved slow / medium / fast.
 
 PASS when, for every session: `verify-session` succeeds (all checksums, contiguous `frame_id`, every drop logged with a reason, manifest `COMPLETE`); wrist written ratio and robot sample rate/jitter are reported, with targets wrist ≥ 99 % written at 30 fps and robot ≥ 50 Hz (placeholders, adjusted after the first measurement); recorded raw timestamp fields are populated or explicitly `null` per device capability; reader round-trip reproduces raw depth × `depth_units_m` exactly; sessions are registered in `fixtures/registry.yaml`.

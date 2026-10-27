@@ -20,7 +20,7 @@ docker compose run --rm dev tools/check.sh      # ruff, mypy --strict core, pyte
 # record (robot is moved by the operator; the recorder only reads state)
 docker compose run --rm rig mvsr record --cameras wrist --scenario SMOKE --object <name> --duration 60
 docker compose run --rm rig mvsr record --cameras wrist,head --scenario R-STATIC --object <name> \
-    --gt constant_T_base_obj --duration 120
+    --gt constant_T_base_obj --duration 30
 #   --preview (needs `xhost +si:localuser:$USER`): SPACE pause/resume, A annotate, Q stop; Ctrl+C stops cleanly
 
 docker compose run --rm dev mvsr inspect-session <session_id> [--json]   # rates, drops, jitter, coverage
