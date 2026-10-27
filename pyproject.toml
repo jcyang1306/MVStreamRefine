@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mvsr"
+version = "0.1.0"
+description = "MVStreamRefine V2: object-centric RGB-D tracking and reconstruction (wrist RealSense + RM65)"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "numpy>=1.26",
+  "PyYAML>=6.0",
+  # PNG IO and the optional recorder preview window (ADR-0006).
+  "opencv-python>=4.8",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "hypothesis>=6.100",
+  # Test-only reference implementation (Euler / quaternion / slerp checks).
+  "scipy>=1.11",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "types-PyYAML",
+]
+# Hardware SDKs; installed only in the Docker `rig` target (ADR-0007).
+rig = [
+  "pyrealsense2>=2.54,<3",
+  "Robotic_Arm==1.1.6",
+]
+
+[project.scripts]
+mvsr = "mvsr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mvsr*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY", "RUF"]
+ignore = [
+  "E501",   # wrapping is owned by `ruff format`; long f-string messages are allowed
+  "E741",   # single-letter math names (I, R, K) are idiomatic here
+  "RUF001", "RUF002", "RUF003",  # unicode math symbols in docstrings/comments
+  "N803", "N806",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = [
+  "hardware: needs the real rig (D405/D435/RM65); run with --run-hardware in the `rig` service",
+]

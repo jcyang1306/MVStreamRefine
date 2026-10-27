@@ -1,0 +1,20 @@
+# V1 reference checkout / symlink (ADR-0006): read-only, never committed.
+ref/
+# Recorded sessions and processing outputs live under $MVSR_DATA_ROOT (default ./data).
+data/
+output/
+outputs/
+runs/
+
+# Python / tooling caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.venv/
+*.tmp

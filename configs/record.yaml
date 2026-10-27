@@ -1,0 +1,64 @@
+# `mvsr record` configuration (subplans/00_FOUNDATION.md F5).
+# Each value: unit, source, failure behaviour. PLACEHOLDER = not yet measured on the rig;
+# revise after the first I-P0 sessions (inspect-session reports the measured values).
+
+cameras:
+  wrist:
+    # Intel RealSense D405 on the RM65 wrist (MASTER_PLAN.md hardware, confirmed 2026-10-27).
+    serial: "323622271240"        # recording refuses to start if the opened device differs
+    width: 1280                   # px, registered color resolution
+    height: 720                   # px
+    fps: 30                       # Hz; CLI --wrist-fps overrides
+    color_format: bgr8            # device stream format (V1-proven on this D405); PNG stores RGB
+    depth_units_m: 1.0e-4         # m per raw unit (ADR-0003); start fails if SDK differs (rtol 1e-6)
+    writer_threads: 3             # PNG encode+write workers for this stream
+  head:
+    # Fixed RealSense D435 (ADR-0007): optional stream, recorded only, unverified extrinsic.
+    serial: "244622070961"
+    width: 1280
+    height: 720
+    fps: 15                       # Hz default when enabled (ADR-0007 disk budget); --head-fps overrides
+    color_format: rgb8            # bgr8 does not stream at 1280x720 on this D435 (V1 capture.yaml)
+    depth_units_m: 1.0e-3
+    writer_threads: 2
+
+capture:
+  warmup_frames: 30               # framesets discarded per camera before START (auto-exposure settle)
+  first_frame_timeout_ms: 15000   # V1: the first frame of a second RealSense can take > 5 s
+  frame_timeout_ms: 1000          # per wait; a timeout is not a frame (no frame_id is assigned)
+  max_consecutive_timeouts: 3     # exceeded -> camera treated as disconnected, session ABORTED
+  process_queue_size: 4           # framesets waiting for align+copy per camera; full -> DROPPED_QUEUE_FULL
+  writer_queue_size: 48           # aligned frames waiting for PNG write per camera (~1.6 s @30 fps,
+                                  # ~220 MB RAM); full -> DROPPED_QUEUE_FULL
+  png_compression: 1              # zlib level, lossless (ADR-0003 "fast compression")
+  fsync_images: true              # fsync each PNG before rename (atomic + durable)
+
+robot:
+  ip: 192.168.1.19                # RM65 controller (MASTER_PLAN.md)
+  port: 8080
+  source: poll                    # poll | udp; udp reconfigures the controller push target
+                                  # (restored on exit) and is unverified on this controller
+  poll_hz: 100                    # PLACEHOLDER request rate; I-P0 target >= 50 Hz measured
+  udp_port: 8089                  # host UDP port for push mode (RealMan default)
+  udp_cycle_5ms_units: 2          # push period in 5 ms units (RealMan protocol) -> 100 Hz; verify on rig
+  udp_host_ip: null               # null = interface routing to the controller
+  abort_after_failure_s: 5.0      # continuous read failures longer than this -> session ABORTED
+
+handeye:
+  # Reference hand-eye calibration 2026-10-12 (ADR-0007), vendored byte-identical from
+  # ref/MVStreamRefine/data/handeye/handeye_tf.txt. Checksum mismatch -> recording refused.
+  path: configs/handeye/handeye_tf_20261012.txt
+  sha256: db07f1dd5cbc204c8a8d8f91c9d4025572d59fe4d54dcce5916f8d1a2d5fd61f
+
+disk:
+  reserve_gb: 20.0                # PLACEHOLDER free space kept on the data disk; refuse to start below
+                                  # reserve + estimate; stop cleanly (COMPLETE) when reached
+  est_bytes_per_frame:            # PLACEHOLDER from ADR-0003 (3-4 MB per 1280x720 RGB-D PNG pair)
+    wrist: 3.5e+6                 # bytes; YAML 1.1 needs the exponent sign (3.5e6 is a string)
+    head: 3.5e+6
+  estimate_duration_s: 600        # session length assumed for the start check when --duration is absent
+  check_interval_s: 1.0           # free-space polling period during recording
+
+monitor:
+  status_interval_s: 5.0          # console status line period
+  preview_max_width: 960          # px, preview window width (display only)

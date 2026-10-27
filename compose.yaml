@@ -1,0 +1,53 @@
+# MVStreamRefine V2 services (ADR-0006).
+#
+#   docker compose build dev rig
+#   docker compose run --rm dev tools/check.sh          # lint + types + tests
+#   docker compose run --rm dev mvsr verify-session <session_id>
+#
+# Recording on the rig (USB + host network for RM65 at 192.168.1.19 + X11 preview):
+#   xhost +si:localuser:$USER        # only when using --preview
+#   docker compose run --rm rig mvsr record --cameras wrist --scenario SMOKE --object <name>
+#
+# Containers run as the host user so session files are not root-owned. UID/GID
+# default to 1000 (hkclr_user on CW20175); export UID GID to override.
+# The V1 reference is mounted read-only at /v1 (MVSR_V1_ROOT); its symlink target
+# is resolved by the Docker daemon on the host.
+
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    image: mvsr:cu121
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /workspace
+    environment:
+      MVSR_DATA_ROOT: /workspace/data
+      MVSR_V1_ROOT: /v1
+      HOME: /tmp
+    volumes:
+      - .:/workspace
+      - ./data:/workspace/data
+      - ${MVSR_V1_HOST_ROOT:-./ref/MVStreamRefine}:/v1:ro
+
+  rig:
+    build:
+      context: .
+      target: rig
+    image: mvsr:cu121-rig
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /workspace
+    privileged: true
+    network_mode: host
+    environment:
+      MVSR_DATA_ROOT: /workspace/data
+      MVSR_V1_ROOT: /v1
+      HOME: /tmp
+      DISPLAY: ${DISPLAY:-:0}
+      QT_X11_NO_MITSHM: "1"
+    volumes:
+      - .:/workspace
+      - ./data:/workspace/data
+      - ${MVSR_V1_HOST_ROOT:-./ref/MVStreamRefine}:/v1:ro
+      - /dev/bus/usb:/dev/bus/usb
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
