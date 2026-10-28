@@ -82,6 +82,23 @@ def _freeze(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
+def robot_sample_from_record(r: RobotRecord) -> RobotSample | None:
+    """`RobotSample` of a successful read (HOST_MONOTONIC); None for a failed read."""
+    if r.error is not None or r.tcp_xyzrpy is None:
+        return None
+    xyzrpy = np.asarray(r.tcp_xyzrpy, dtype=np.float64)
+    return RobotSample(
+        seq=r.seq,
+        t_host_ns=r.t_host_ns,
+        clock_domain=ClockDomain.HOST_MONOTONIC,
+        T_base_tcp=xyzrpy_to_T_base_tcp(xyzrpy),
+        joints_rad=None if r.joints_rad is None else np.asarray(r.joints_rad, dtype=np.float64),
+        raw_xyzrpy=xyzrpy,
+        source=r.source,  # type: ignore[arg-type]
+        read_latency_ns=r.read_latency_ns,
+    )
+
+
 class SessionReader:
     def __init__(self, session_dir: str | Path, *, verify_checksums: bool = True) -> None:
         self.dir = Path(session_dir)
@@ -199,26 +216,7 @@ class SessionReader:
 
     def robot_samples(self) -> list[RobotSample]:
         """Successful robot reads as `RobotSample` (failed reads are skipped; see robot_records)."""
-        out = []
-        for r in self.robot_records():
-            if r.error is not None or r.tcp_xyzrpy is None:
-                continue
-            xyzrpy = np.asarray(r.tcp_xyzrpy, dtype=np.float64)
-            out.append(
-                RobotSample(
-                    seq=r.seq,
-                    t_host_ns=r.t_host_ns,
-                    clock_domain=ClockDomain.HOST_MONOTONIC,
-                    T_base_tcp=xyzrpy_to_T_base_tcp(xyzrpy),
-                    joints_rad=None
-                    if r.joints_rad is None
-                    else np.asarray(r.joints_rad, dtype=np.float64),
-                    raw_xyzrpy=xyzrpy,
-                    source=r.source,  # type: ignore[arg-type]
-                    read_latency_ns=r.read_latency_ns,
-                )
-            )
-        return out
+        return [s for r in self.robot_records() if (s := robot_sample_from_record(r)) is not None]
 
     def events(self) -> list[EventRecord]:
         return [EventRecord.from_dict(d) for d in read_jsonl(self.dir / EVENTS_NAME)]

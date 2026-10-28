@@ -1,5 +1,5 @@
 # ADR-0007: New recordings only, recorder in P0, head camera recorded
-Status: Accepted (owner decisions 2026-10-27). Date: 2026-10-27.
+Status: Accepted (owner decisions 2026-10-27). Date: 2026-10-27. Reference file superseded 2026-10-28.
 
 ## Owner decisions
 1. The hand-eye calibration of 2026-10-12 is the reference from now on: `ref/MVStreamRefine/data/handeye/handeye_tf.txt`, sha256 `db07f1dd5cbc204c8a8d8f91c9d4025572d59fe4d54dcce5916f8d1a2d5fd61f` (block `wrist_cam2 = T_tcp_cam`; block `base_cam1 = T_base_head`). Older calibrations are not used.
@@ -14,6 +14,15 @@ Status: Accepted (owner decisions 2026-10-27). Date: 2026-10-27.
 - **Head camera** (D435, serial `244622070961`, fixed, `T_base_head` from `base_cam1`, depth unit `1e-3 m`, color `rgb8` required at 1280×720) is a first-class optional stream in the session format (`camera_id = head`). V2 algorithms remain wrist-only for the first release; using the head stream in tracking/mapping/GT needs a later ADR. The head calibration was not re-done on 2026-10-12 and is unverified.
 - **Disk budget.** Workstation system disk has ≈ 113 GB free (2026-10-27). Lossless 1280×720 @ 30 fps is ≈ 6 GB/min per camera. Defaults: wrist 30 fps; head disabled unless requested, and when enabled 15 fps. The recorder refuses to start when free space < configured reserve + estimated session size, and stops cleanly (manifest finalized) when the reserve is reached.
 - The two RealSense devices are not hardware-synchronized; each stream keeps its own timestamps and frame ids.
+
+## Amendment (2026-10-28)
+The owner supplied `configs/handeye/calibration_result.json` (created 2026-10-28T09:46:49Z, session `real_train_007`, method PARK, quality `exploratory`). It replaces the 2026-10-12 file as the reference copied into new recordings:
+
+- `cam2toeef` (D405 `323622271240`, `cam2_rgb` → `rm65_tcp_Arm_Tip`) is `wrist_cam2` = `T_tcp_cam`.
+- `cam1tobase` (D435 `244622070961`, `cam1_rgb` → `base`) is `base_cam1` = `T_base_head`.
+- `targettobase` stays in the JSON only. It is the checkerboard pose of that calibration run, not an object frame (ADR-0005).
+
+Active file: `configs/handeye/handeye_tf_20261028.txt`, sha256 `2b60289b9b68c62b08d40eddc0a06232249c152d12ec1687639e6c2d974d0ef3`. The 2026-10-12 file (`db07f1dd…`) stays in the tree because completed sessions copied it. Sessions recorded before this amendment keep that copy; `verify-session` warns when a session copy is not the current reference. Relative to 2026-10-12: wrist 2.9 mm / 1.1°, head 9.3 mm / 4.8°. The JSON quality field remains `exploratory`.
 
 ## Consequences
 - P0 now has hardware-bound code (`mvsr.devices`, `mvsr.record`). Core/IO modules stay pure CPU; hardware tests are `@pytest.mark.hardware` and run in the `rig` compose service.

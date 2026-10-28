@@ -47,10 +47,11 @@ robot:
   poll_retry_delay_s: 0.02        # wait between those attempts
 
 handeye:
-  # Reference hand-eye calibration 2026-10-12 (ADR-0007), vendored byte-identical from
-  # ref/MVStreamRefine/data/handeye/handeye_tf.txt. Checksum mismatch -> recording refused.
-  path: configs/handeye/handeye_tf_20261012.txt
-  sha256: db07f1dd5cbc204c8a8d8f91c9d4025572d59fe4d54dcce5916f8d1a2d5fd61f
+  # Reference 2026-10-28 (ADR-0007 amendment): cam2toeef -> wrist_cam2, cam1tobase -> base_cam1,
+  # from configs/handeye/calibration_result.json. Checksum mismatch -> recording refused.
+  # 2026-10-12 file remains for sessions that already copied it.
+  path: configs/handeye/handeye_tf_20261028.txt
+  sha256: 2b60289b9b68c62b08d40eddc0a06232249c152d12ec1687639e6c2d974d0ef3
 
 disk:
   reserve_gb: 20.0                # refuse to start if free < this; stop COMPLETE when reached during capture.

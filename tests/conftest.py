@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 REPO = Path(__file__).resolve().parents[1]
-REFERENCE_HANDEYE = REPO / "configs" / "handeye" / "handeye_tf_20261012.txt"
+REFERENCE_HANDEYE = REPO / "configs" / "handeye" / "handeye_tf_20261028.txt"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

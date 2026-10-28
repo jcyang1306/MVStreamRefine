@@ -10,7 +10,7 @@
 ## Robot and calibration inputs
 - RM65 controller returns TCP pose as `[x, y, z, rx, ry, rz]` (m, rad), semantics `T_base_tcp`, rotation `R = Rz(rz) @ Ry(ry) @ Rx(rx)` (= scipy `from_euler('xyz')`, extrinsic). Euler angles exist only inside the robot adapter; core state uses rotation matrices.
 - Joint angles are recorded alongside the controller pose so FK can be recomputed if the controller pose is ever in doubt.
-- Hand-eye file `handeye_tf.txt` (reference: 2026-10-12 calibration, ADR-0007): block `wrist_cam2` = `T_tcp_cam`; block `base_cam1` = `T_base_head` for the fixed D435 (recorded, unverified, not used by V2 algorithms yet).
+- Hand-eye file `handeye_tf.txt` (reference: 2026-10-28, ADR-0007 amendment): block `wrist_cam2` = `T_tcp_cam`; block `base_cam1` = `T_base_head`. Quality of that solve is `exploratory`. V2 algorithms stay wrist-only.
 - Quaternions on disk use `xyzw` with canonical `w >= 0`.
 
 ## Object frame

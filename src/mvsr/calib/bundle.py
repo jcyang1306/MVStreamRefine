@@ -48,8 +48,8 @@ def build_bundle(
             )
         extr = {"T_tcp_cam": None, "T_base_head": handeye.T_base_head}
         note = (
-            f"T_base_head = base_cam1 of {handeye.source_path}; not re-calibrated on "
-            f"{REFERENCE_HANDEYE_DATE}, unverified (ADR-0007)"
+            f"T_base_head = base_cam1 of the {REFERENCE_HANDEYE_DATE} calibration "
+            f"({handeye.source_path}); quality exploratory (ADR-0007 amendment)"
         )
     dist = [float(v) for v in distortion]
     if len(dist) != 5:
@@ -71,3 +71,29 @@ def build_bundle(
         "dt_robot_cam_ns not yet estimated (P1)",
         **extr,
     )
+
+
+def with_handeye(bundle: CalibrationBundle, handeye: HandEye) -> CalibrationBundle:
+    """Same intrinsics, extrinsic replaced. The raw session file is not touched.
+
+    `calibration_id` changes because it covers the extrinsic. Used to evaluate a new
+    hand-eye file on an already recorded session.
+    """
+    from dataclasses import fields
+
+    if bundle.mount == "wrist":
+        extrinsic = handeye.T_tcp_cam
+        key = "T_tcp_cam"
+    else:
+        if handeye.T_base_head is None:
+            raise ContractValidationError(
+                "hand-eye file has no base_cam1 block for the head camera"
+            )
+        extrinsic = handeye.T_base_head
+        key = "T_base_head"
+    kwargs = {f.name: getattr(bundle, f.name) for f in fields(bundle) if f.name != "calibration_id"}
+    kwargs[key] = extrinsic
+    kwargs["source_files"] = {**dict(bundle.source_files), HANDEYE_SESSION_PATH: handeye.sha256}
+    note = f"extrinsic replaced by hand-eye {handeye.sha256[:12]} ({handeye.source_path})"
+    kwargs["notes"] = f"{bundle.notes}; {note}" if bundle.notes else note
+    return CalibrationBundle.create(**kwargs)

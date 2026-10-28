@@ -29,8 +29,22 @@ docker compose run --rm dev mvsr verify-session <session_id> --p0-gate   # integ
 docker compose run --rm dev mvsr register-session <session_id> --used-by P0-gate
 docker compose run --rm rig pytest -q tests/hardware --run-hardware       # 10 s live pytest smokes (auto --duration)
 ```
-Recorder settings, units and placeholders: `configs/record.yaml`. The 2026-10-12 hand-eye file is
-vendored byte-identical at `configs/handeye/handeye_tf_20261012.txt` (sha256 pinned, ADR-0007).
+## P1 usage (sensors: clock mapping, robot priors, SensorFrame replay)
+```bash
+docker compose run --rm dev mvsr replay <session_id> [--speed 1.0] [--limit N]   # SensorFrames; prints output sha256
+docker compose run --rm dev mvsr sensors-report <session_id> [...] [--square-mm 15]  # timing/sync (+ board for R-CALIB) -> data/runs/
+docker compose run --rm dev mvsr i0-gate                                           # I0 on registry sessions used_by I0
+docker compose run --rm rig pytest -q tests/hardware --run-hardware                # includes the live SensorFrame source
+```
+```python
+from mvsr.sensors.replay import ReplaySource
+for frame in ReplaySource("data/sessions/<session_id>"):   # wrist by default
+    frame.header.timestamp_ns, frame.T_base_cam_prior, frame.pose_sync.status
+```
+Settings and placeholders: `configs/sensors.yaml`; evidence and limits: `subplans/01_SENSORS.md`.
+
+Recorder settings, units and placeholders: `configs/record.yaml`. The hand-eye reference is
+`configs/handeye/handeye_tf_20261028.txt` (from `calibration_result.json`, sha256 pinned, ADR-0007). The 2026-10-12 file remains for sessions that already copied it.
 
 ### P0 format notes (additions to `contracts/SESSION_FORMAT.md`, all optional and raw-only)
 - `frames.jsonl`: `color`/`depth` carry `raw_sha256` (pixel hash before PNG encoding, used by

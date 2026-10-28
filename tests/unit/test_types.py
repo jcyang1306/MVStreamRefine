@@ -71,7 +71,7 @@ def bundle(reference_handeye_path_module: Path) -> CalibrationBundle:
 
 @pytest.fixture(scope="module")
 def reference_handeye_path_module() -> Path:
-    return Path(__file__).resolve().parents[2] / "configs/handeye/handeye_tf_20261012.txt"
+    return Path(__file__).resolve().parents[2] / "configs/handeye/handeye_tf_20261028.txt"
 
 
 def header(bundle: CalibrationBundle, frame_id: int = 3) -> Header:

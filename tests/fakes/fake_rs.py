@@ -70,9 +70,10 @@ class FakeFrame:
         )
 
     def get_frame_metadata(self, key: _Enum) -> int:
+        counter_us = int(self._ts * 1000) % (1 << 32)  # uint32 device counter
         return {
-            "sensor_timestamp": int(self._ts * 1000) - 5000,
-            "frame_timestamp": int(self._ts * 1000),
+            "sensor_timestamp": (counter_us - 5000) % (1 << 32),
+            "frame_timestamp": counter_us,
             "actual_exposure": 8000,
             "time_of_arrival": int(self._ts) + 3,
         }[key.name]
@@ -228,7 +229,7 @@ class FakePipeline:
         color = rng.integers(0, 256, size=(h, w, 3), dtype=np.uint8)
         depth = rng.integers(0, 2000, size=(h, w), dtype=np.uint16)
         depth[0, :] = 0
-        ts = 1.7e12 + n * 33.3
+        ts = time.time() * 1000.0  # "global_time" = CLOCK_REALTIME ms, like librealsense
         c = FakeFrame(color, n, ts, self.rs)
         d = FakeFrame(depth, n, ts, self.rs)
         if spec.incomplete_every and n % spec.incomplete_every == spec.incomplete_every - 1:

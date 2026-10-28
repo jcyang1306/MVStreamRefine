@@ -62,7 +62,7 @@ docker compose run --rm dev mvsr register-session <session_id> --used-by P0-gate
 ## Completion checklist
 - [x] API documentation and schema tests complete.
 - [x] Deterministic offline test passes and reproduction command recorded (`docker compose run --rm dev tools/check.sh`).
-- [x] Integration gate evidence and quantitative metrics saved. Registered P0-gate sessions: `20261027T103359_CW20175_9605` (wrist SMOKE), `20261027T105934_CW20175_f4d5` (wrist+head R-STATIC). Live `tests/hardware` passed on CW20175. Going forward a single operator-stopped take + `verify-session --p0-gate` is sufficient.
+- [x] Integration gate evidence and quantitative metrics saved. Registered P0-gate session: `20261028T080558_CW20175_9fb3` (wrist+head R-STATIC, one operator-stopped take, `verify-session --p0-gate` OK). The 2026-10-27 SMOKE / timed R-STATIC sessions were removed from disk and from the registry. Live `tests/hardware` passed on CW20175.
 - [x] Known limitations recorded; no false success or hidden fallback.
 - [x] Handoff report names changed files, tests, residual risks and next phase (below).
 
@@ -76,7 +76,7 @@ docker compose run --rm dev mvsr register-session <session_id> --used-by P0-gate
 
 **Reproduce:** `docker compose run --rm dev tools/check.sh`. Operator P0 take: `mvsr record --object <name> --gt constant_T_base_obj` then `verify-session --p0-gate`. Rig smoke: `docker compose run --rm rig pytest -q tests/hardware --run-hardware`.
 
-**Residual risks:** D435 `exposure_us` often null; dual-cam USB can lower delivered fps (not gated); RM65 poll can still log `ret=-2` after retries (session continues unless failures last `abort_after_failure_s`); UDP push unverified; R-CALIB not recorded (P1).
+**Residual risks:** D435 `exposure_us` often null; dual-cam USB can lower delivered fps (not gated) and makes 14–15 % of wrist framesets pair colour and depth from different exposures (found in P1, ADR-0004 §8; P1 sources drop them with counts); RM65 poll can still log `ret=-2` after retries (session continues unless failures last `abort_after_failure_s`); UDP push unverified; R-CALIB not recorded (P1).
 
 **Next:** P1 `subplans/01_SENSORS.md` / I0 — replay with clock mapping and interpolated robot poses; R-CALIB recommended.
 

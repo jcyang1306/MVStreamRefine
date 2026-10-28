@@ -37,3 +37,7 @@ class SessionFormatError(MvsrError):
 
 class DeviceError(MvsrError):
     """A hardware device (RealSense, RM65) failed, disconnected or is misconfigured."""
+
+
+class ClockModelError(MvsrError):
+    """Recorded camera clocks cannot be mapped to HOST_MONOTONIC (reset, reorder, bad fit)."""

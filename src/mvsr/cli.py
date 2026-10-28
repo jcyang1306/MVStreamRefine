@@ -6,6 +6,9 @@
     mvsr inspect-session <session_id|path> [--json]
     mvsr verify-session <session_id|path> [--fast] [--json] [--p0-gate]
     mvsr register-session <session_id|path> --used-by P0-gate [--gt TYPE]
+    mvsr replay <session_id|path> [--camera wrist] [--speed S] [--limit N]        # P1
+    mvsr sensors-report <session_id ...> [--square-mm F] [--stride N]           # P1, writes runs/
+    mvsr i0-gate [<session_id ...>]                       # P1 gate (default: registry used_by I0)
 
 Exit codes: 0 success, 1 check failed / session aborted, 2 usage or configuration error.
 """
@@ -98,7 +101,50 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--used-by", required=True, help="comma list, e.g. P0-gate,I0")
     p.add_argument("--gt", default=None, help="GT type (default: manifest scenario.gt_type)")
     p.add_argument("--registry", type=Path, default=None, help="default fixtures/registry.yaml")
+    _add_p1(sub)
     return parser
+
+
+def _add_p1(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    p = sub.add_parser("replay", help="replay a session to SensorFrames (P1) and summarize")
+    _add_session_arg(p)
+    p.add_argument("--camera", default="wrist", choices=["wrist", "head"])
+    p.add_argument(
+        "--speed", type=float, default=None, help="pace at S x recorded time (default: fast)"
+    )
+    p.add_argument("--limit", type=int, default=None, help="stop after N frames")
+    p.add_argument("--no-verify", action="store_true", help="skip per-image checksum verification")
+    p.add_argument(
+        "--config", type=Path, default=None, help="sensors YAML (default configs/sensors.yaml)"
+    )
+    p.add_argument("--json", action="store_true", help="machine-readable summary on stdout")
+
+    for name, helptext in (
+        ("sensors-report", "timing/sync report (+ board check for R-CALIB) written to runs/"),
+        ("i0-gate", "I0 gate: sensors report + decision (default: registry sessions used_by I0)"),
+    ):
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument(
+            "sessions", nargs="*" if name == "i0-gate" else "+", help="session ids or dirs"
+        )
+        p.add_argument("--data-root", type=Path, default=None, help="override $MVSR_DATA_ROOT")
+        p.add_argument(
+            "--square-mm", type=float, default=None, help="board square (else notes square_mm=)"
+        )
+        p.add_argument(
+            "--stride", type=int, default=None, help="check every Nth frame for the board"
+        )
+        p.add_argument("--no-board", action="store_true", help="skip the board check")
+        p.add_argument(
+            "--config", type=Path, default=None, help="sensors YAML (default configs/sensors.yaml)"
+        )
+        p.add_argument(
+            "--handeye",
+            type=Path,
+            default=None,
+            help="evaluate with this hand-eye file instead of the copy stored in the session",
+        )
+        p.add_argument("--json", action="store_true", help="print the full JSON report")
 
 
 def _cmd_record(args: argparse.Namespace) -> int:
@@ -150,6 +196,112 @@ def _cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_replay(args: argparse.Namespace) -> int:
+    import hashlib
+    import time
+    from collections import Counter
+
+    from mvsr.paths import resolve_session_dir
+    from mvsr.sensors.config import load_sensors_config
+    from mvsr.sensors.replay import ReplaySource
+
+    path = resolve_session_dir(args.session, args.data_root and args.data_root.resolve())
+    src = ReplaySource(
+        path,
+        args.camera,
+        config=load_sensors_config(args.config),
+        speed=args.speed,
+        verify_images=not args.no_verify,
+    )
+    digest = hashlib.sha256()
+    sync: Counter[str] = Counter()
+    methods: Counter[str] = Counter()
+    n = 0
+    t0 = time.monotonic()
+    first = last = None
+    for f in src:
+        n += 1
+        sync[f.pose_sync.status.value] += 1
+        methods[f.timing.method] += 1
+        first = first if first is not None else f.header.timestamp_ns
+        last = f.header.timestamp_ns
+        digest.update(
+            f"{f.header.frame_id}:{f.header.timestamp_ns}:{f.pose_sync.status.value}".encode()
+        )
+        if f.T_base_cam_prior is not None:
+            digest.update(f.T_base_cam_prior.matrix.tobytes())
+        if args.limit is not None and n >= args.limit:
+            break
+    wall = time.monotonic() - t0
+    out = {
+        "session_id": src.session_id,
+        "camera": args.camera,
+        "frames": n,
+        "sync": dict(sorted(sync.items())),
+        "timestamp_methods": dict(sorted(methods.items())),
+        "recorded_span_s": None if first is None or last is None else (last - first) / 1e9,
+        "wall_s": round(wall, 3),
+        "fps": round(n / wall, 2) if wall > 0 else None,
+        "output_sha256": digest.hexdigest(),
+    }
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_sensors_report(args: argparse.Namespace) -> int:
+    from dataclasses import replace
+
+    from mvsr.calib.handeye import load_handeye
+    from mvsr.paths import resolve_session_dir
+    from mvsr.sensors.config import load_sensors_config
+    from mvsr.sensors.report import format_report, i0_decision, session_report, write_run
+
+    root = args.data_root and args.data_root.resolve()
+    cfg = load_sensors_config(args.config)
+    handeye = load_handeye(args.handeye, expected_sha256=None) if args.handeye else None
+    if args.stride is not None:
+        cfg = replace(cfg, board=replace(cfg.board, stride=args.stride))
+    sessions = list(args.sessions)
+    if args.command == "i0-gate" and not sessions:
+        from mvsr.io.registry import load_registry
+
+        sessions = [e["session_id"] for e in load_registry() if "I0" in e["used_by"]]
+        if not sessions:
+            print("I0 decision: BLOCKED (no registry sessions used_by I0)", file=sys.stderr)
+            return 1
+    reports, bundles = [], {}
+    for s in sessions:
+        rep, b = session_report(
+            resolve_session_dir(s, root),
+            cfg,
+            square_mm=args.square_mm,
+            board=False if args.no_board else None,
+            handeye=handeye,
+        )
+        reports.append(rep)
+        if b:
+            bundles[rep["session_id"]] = b
+    decision = (
+        i0_decision(reports, cfg)
+        if args.command == "i0-gate" or any(r["board_check"] for r in reports)
+        else None
+    )
+    run_dir = write_run(reports, bundles, decision, cfg, root)
+    if args.json:
+        print(
+            json.dumps(
+                {"sessions": reports, "i0": decision, "run_dir": str(run_dir)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print(format_report(reports, decision, run_dir))
+    if args.command == "i0-gate":
+        return 1 if decision is None or decision["decision"] == "BLOCKED" else 0
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -161,6 +313,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "inspect-session": _cmd_inspect,
         "verify-session": _cmd_verify,
         "register-session": _cmd_register,
+        "replay": _cmd_replay,
+        "sensors-report": _cmd_sensors_report,
+        "i0-gate": _cmd_sensors_report,
     }
     from mvsr.core.errors import MvsrError
 

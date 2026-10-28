@@ -95,17 +95,19 @@ def test_handeye_reference_file(reference_handeye_path: Path) -> None:
     )
     np.testing.assert_array_equal(
         he.T_tcp_cam.matrix[0],
-        [0.7309865907111534, 0.5929286867088821, 0.33777829515551216, -0.06366091630072569],
+        [0.7277602754156012, 0.5901906006563384, 0.3493422912043638, -0.06272554725040205],
     )
     np.testing.assert_array_equal(
-        he.T_tcp_cam.t, [-0.06366091630072569, -0.055732728637328574, 0.09396108001466855]
+        he.T_tcp_cam.t, [-0.06272554725040205, -0.05384837601441987, 0.09590180754456334]
     )
-    np.testing.assert_array_equal(he.T_base_head.t, [-0.13905919, 0.01150721, 0.44054436])
+    np.testing.assert_array_equal(
+        he.T_base_head.t, [-0.13887491460451584, 0.010234225357097115, 0.4497862287091321]
+    )
 
 
 def test_handeye_checksum_and_malformed(tmp_path: Path, reference_handeye_path: Path) -> None:
     changed = tmp_path / "h.txt"
-    changed.write_text(reference_handeye_path.read_text().replace("0.0939", "0.0940"))
+    changed.write_text(reference_handeye_path.read_text().replace("0.095901", "0.096001"))
     with pytest.raises(ChecksumMismatchError):
         load_handeye(changed)
     load_handeye(changed, expected_sha256=None)

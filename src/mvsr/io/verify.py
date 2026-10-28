@@ -136,7 +136,7 @@ def _check_camera(
                 f"{cid}: bundle source_files hand-eye sha differs from the session copy"
             )
         elif he_sha != REFERENCE_HANDEYE_SHA256:
-            rep.warnings.append("hand-eye copy is not the 2026-10-12 reference (ADR-0007)")
+            rep.warnings.append("hand-eye copy is not the 2026-10-28 reference (ADR-0007)")
     except (MvsrError, OSError, KeyError, ValueError) as exc:
         rep.errors.append(f"{cid}: calibration invalid: {exc}")
     try:

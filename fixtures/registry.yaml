@@ -12,18 +12,8 @@
 #   gt: constant_T_base_obj
 #   object: <name>
 #   used_by: [P0-gate, I0, I2]
-- session_id: 20261027T103359_CW20175_9605
-  manifest_sha256: f0d274b8b97558a0364758ed9d4c9b37c6e3038f678f1e40035500e302308432
-  cameras:
-  - wrist
-  scenario:
-  - SMOKE
-  gt: null
-  object: cup
-  used_by:
-  - P0-gate
-- session_id: 20261027T105934_CW20175_f4d5
-  manifest_sha256: 051545a95fa6dfed20cc7f0f23c11d8adaa6c85ca4376c63bf577666e33b1724
+- session_id: 20261028T080558_CW20175_9fb3
+  manifest_sha256: d50157328e16122109065b83e77a6050ad97014e0ace4d297dea8635b6f3bd18
   cameras:
   - head
   - wrist
@@ -32,4 +22,16 @@
   gt: constant_T_base_obj
   object: cup
   used_by:
+  - I0
   - P0-gate
+- session_id: 20261028T083612_CW20175_5bf8
+  manifest_sha256: 1274d2fa65347b8e5f2637e16fbcddd33c35c681a76cea0e6c08bb804bcca999
+  cameras:
+  - head
+  - wrist
+  scenario:
+  - R-CALIB
+  gt: constant_board_in_base
+  object: checkerboard
+  used_by:
+  - I0

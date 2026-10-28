@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import hashlib
-import types
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin, get_type_hints
+from typing import Any
 
 import yaml
 
 from mvsr.paths import repo_root
+from mvsr.yaml_config import ConfigError
+from mvsr.yaml_config import load_section as _section
+
+__all__ = ["ConfigError", "RecordConfig", "load_record_config"]
 
 DEFAULT_CONFIG = "configs/record.yaml"
-
-
-class ConfigError(ValueError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -92,47 +91,6 @@ class RecordConfig:
     def handeye_path(self) -> Path:
         p = Path(self.handeye.path)
         return p if p.is_absolute() else repo_root() / p
-
-
-def _typed(value: Any, tp: Any, where: str) -> Any:
-    """Check one YAML value against its annotation (YAML 1.1 reads e.g. `3.5e6` as a string)."""
-    origin = get_origin(tp)
-    if origin is Union or origin is types.UnionType:
-        if value is None and type(None) in get_args(tp):
-            return None
-        (inner,) = [a for a in get_args(tp) if a is not type(None)]
-        return _typed(value, inner, where)
-    if origin is dict:
-        if not isinstance(value, dict):
-            raise ConfigError(f"{where}: expected a mapping")
-        kt, vt = get_args(tp)
-        return {_typed(k, kt, where): _typed(v, vt, f"{where}.{k}") for k, v in value.items()}
-    if tp is bool:
-        ok = isinstance(value, bool)
-    elif tp is int:
-        ok = isinstance(value, int) and not isinstance(value, bool)
-    elif tp is float:
-        ok = isinstance(value, (int, float)) and not isinstance(value, bool)
-        value = float(value) if ok else value
-    elif tp is str:
-        ok = isinstance(value, str)
-    else:
-        raise ConfigError(f"{where}: unsupported annotation {tp!r}")
-    if not ok:
-        raise ConfigError(f"{where}: expected {getattr(tp, '__name__', tp)}, got {value!r}")
-    return value
-
-
-def _section(raw: dict[str, Any], cls: type[Any], name: str) -> Any:
-    data = raw.get(name)
-    if not isinstance(data, dict):
-        raise ConfigError(f"missing section '{name}'")
-    names = set(cls.__dataclass_fields__)
-    unknown, missing = set(data) - names, names - set(data)
-    if unknown or missing:
-        raise ConfigError(f"section '{name}': unknown {sorted(unknown)}, missing {sorted(missing)}")
-    hints = get_type_hints(cls)
-    return cls(**{k: _typed(v, hints[k], f"{name}.{k}") for k, v in data.items()})
 
 
 def load_record_config(path: str | Path | None = None) -> RecordConfig:

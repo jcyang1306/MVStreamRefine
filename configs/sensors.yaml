@@ -1,0 +1,57 @@
+# P1 sensors configuration (subplans/01_SENSORS.md): clock mapping, robot pairing, replay,
+# live source, R-CALIB board check and the I0 gate. Each value: unit, source, failure behaviour.
+# PLACEHOLDER = chosen before measurement; revise with evidence from `mvsr sensors-report`.
+
+clock:
+  device_counter_period_us: 4294967296  # RealSense SENSOR/FRAME_TIMESTAMP metadata is a uint32 µs counter
+  max_rate_error_ppm: 1000.0            # |envelope rate - 1| above this -> ClockModelError (measured -68 ppm, 2026-10-28)
+  min_envelope_points: 10               # fewer device-stamped frames -> no envelope cross-check
+  fallback_latency_ns: 28000000         # PLACEHOLDER used only without RealSense global time: envelope /
+                                        # arrival minus this constant; = wrist min transfer latency measured
+                                        # 2026-10-28 (27.2-28.0 ms); method string declares it
+
+sync:
+  max_interp_gap_ns: 25000000           # ADR-0004 placeholder 25 ms; robot poll interval measured p95 17.4 ms,
+                                        # max 36 ms (2026-10-28) -> ~0.4 % of brackets exceed it (GAP_TOO_LARGE)
+
+rgbd:
+  # Colour/depth from different exposures (repeated colour frame or depth a frame interval off) is
+  # not registered RGB-D: such frames are not emitted, and are counted by reason (src/mvsr/sensors/rgbd.py).
+  max_color_depth_dt_ms:                # |dt - stream median| limit; null disables the check per camera
+    wrist: 5.0                          # in-sync D405 offset -0.23 ms; mismatches are >= 33 ms (2026-10-28)
+    head: 10.0                          # D435 in-sync -32.4 ms (colour has no mid-exposure stamp); mismatches 66.7 ms steps
+  skip_mismatched: true                 # false: emit them anyway with source_meta.rgbd set
+
+live:
+  robot_buffer_s: 2.0                   # robot samples kept for online interpolation (bounded deque)
+  robot_wait_ms: 60                     # wait for a robot sample after the frame time before giving up
+  first_frame_timeout_ms: 15000         # first RealSense frame can take > 5 s (V1 capture)
+  frame_timeout_ms: 1000
+  max_consecutive_timeouts: 3           # exceeded -> DeviceError
+  warmup_frames: 30                     # framesets discarded after start (auto-exposure settle)
+
+board:
+  inner_cols: 11                        # 11 x 8 inner corners (MASTER_PLAN.md); cols + rows must be odd
+  inner_rows: 8
+  square_mm: null                       # null -> `--square-mm` or session notes `square_mm=<v>`; else error
+  max_reproj_rms_px: 1.0                # PLACEHOLDER: PnP fits above this (undistorted px) are rejected
+  stride: 1                             # every Nth written frame is checked
+  workers: 8                            # decode + detection threads
+
+depth:
+  edge_margin_px: 8                     # board pixels closer than this to the inner-corner hull edge are skipped
+  corner_window_px: 2                   # depth median window (2r+1) around a corner for the pitch check
+  bin_m: 0.05                           # distance bin width for depth bias vs. distance
+  min_valid_ratio: 0.3                  # frames with fewer valid board-depth pixels are excluded from depth stats
+
+gate:
+  # I0 targets (INTEGRATION_PLAN.md). All PLACEHOLDER, set before the first measurement from what P3
+  # needs from the prior (ICP/feature init basin of a few mm and < 1 deg); exceeding one gives
+  # PASS-WITH-LIMITS, never BLOCKED.
+  min_board_frames: 100                 # hard: fewer accepted wrist board poses -> BLOCKED
+  min_interpolated_ratio: 0.95          # hard: fewer wrist frames with a robot prior -> BLOCKED
+  min_rgbd_valid_ratio: 0.8             # wrist WRITTEN frames with same-exposure colour/depth
+  max_clock_residual_p95_ms: 1.0        # global time vs. envelope shape residual
+  max_board_spread_p95_mm: 5.0          # T_base_marker translation deviation from the session reference
+  max_board_spread_p95_deg: 1.0
+  max_handeye_reproj_p95_px: 10.0       # board corners re-projected through the robot prior

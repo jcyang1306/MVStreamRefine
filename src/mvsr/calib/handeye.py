@@ -3,9 +3,11 @@
 File format: labeled blocks `<label>:` followed by 16 numbers (a row-major 4x4 matrix, any
 brackets/commas/whitespace). Block semantics (owner-confirmed):
 - `wrist_cam2` = `T_tcp_cam`  (wrist D405 color optical frame in the RM65 tool frame)
-- `base_cam1`  = `T_base_head` (fixed D435; recorded, unverified since 2026-10-12)
-The 2026-10-12 calibration is vendored at `configs/handeye/handeye_tf_20261012.txt` with the
-sha256 below; loading a file with a different checksum raises `ChecksumMismatchError`.
+- `base_cam1`  = `T_base_head` (fixed D435 color optical frame in the robot base)
+The reference is `configs/handeye/handeye_tf_20261028.txt`, taken from
+`calibration_result.json` (`cam2toeef`, `cam1tobase`; session `real_train_007`, method PARK,
+quality `exploratory`). The 2026-10-12 file stays in the tree for the sessions that copied it.
+A different checksum raises `ChecksumMismatchError`.
 """
 
 from __future__ import annotations
@@ -20,8 +22,8 @@ from mvsr.core.errors import ChecksumMismatchError, SessionFormatError
 from mvsr.core.se3 import PoseSE3
 from mvsr.io.atomic import sha256_bytes
 
-REFERENCE_HANDEYE_SHA256 = "db07f1dd5cbc204c8a8d8f91c9d4025572d59fe4d54dcce5916f8d1a2d5fd61f"
-REFERENCE_HANDEYE_DATE = "2026-10-12"
+REFERENCE_HANDEYE_SHA256 = "2b60289b9b68c62b08d40eddc0a06232249c152d12ec1687639e6c2d974d0ef3"
+REFERENCE_HANDEYE_DATE = "2026-10-28"
 WRIST_LABEL = "wrist_cam2"
 HEAD_LABEL = "base_cam1"
 
