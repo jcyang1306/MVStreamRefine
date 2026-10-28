@@ -39,7 +39,7 @@ def config() -> RecordConfig:
             frame_timeout_ms=200,
             max_consecutive_timeouts=3,
         ),
-        robot=replace(cfg.robot, poll_hz=200.0, abort_after_failure_s=0.5),
+        robot=replace(cfg.robot, poll_hz=200.0, abort_after_failure_s=0.5, poll_retry_delay_s=0.0),
         disk=replace(cfg.disk, reserve_gb=0.0, est_bytes_per_frame={"wrist": 1e3, "head": 1e3}),
         monitor=replace(cfg.monitor, status_interval_s=0.5),
     )
@@ -153,8 +153,20 @@ def test_robot_connect_failure(config: RecordConfig, tmp_path: Path) -> None:
     assert sessions(tmp_path) == []
 
 
-def test_robot_read_failures_logged(config: RecordConfig, tmp_path: Path) -> None:
-    rm = FakeRM(fail=lambda n: n % 3 == 1)
+def test_robot_transient_ret_is_retried(config: RecordConfig, tmp_path: Path) -> None:
+    rm = FakeRM(fail=lambda n: n % 2 == 0)
+    res = run(config, request(tmp_path), rm=rm)
+    assert res.status == "COMPLETE"
+    recs = SessionReader(res.session_dir).robot_records()
+    assert recs and all(x.error is None for x in recs)
+    assert rm.arms[0].calls > len(recs)
+    assert verify_session(res.session_dir, p0_gate=True).ok
+
+
+def test_robot_read_failures_logged_after_retries_exhausted(
+    config: RecordConfig, tmp_path: Path
+) -> None:
+    rm = FakeRM(fail=lambda n: n < 4)
     res = run(config, request(tmp_path), rm=rm)
     assert res.status == "COMPLETE"
     r = SessionReader(res.session_dir)
@@ -163,10 +175,7 @@ def test_robot_read_failures_logged(config: RecordConfig, tmp_path: Path) -> Non
     assert failed and all(x.tcp_xyzrpy is None and "ret=-2" in x.error for x in failed)
     assert [x.seq for x in recs] == list(range(len(recs)))
     ok = [x for x in recs if x.error is None]
-    assert (
-        ok[0].joints_rad is not None
-        and abs(ok[0].joints_rad[1] - (-20.0 * 3.141592653589793 / 180)) < 1e-12
-    )
+    assert ok and abs(ok[0].joints_rad[1] - (-20.0 * 3.141592653589793 / 180)) < 1e-12
     assert r.manifest["counts"]["robot"]["failures"] == len(failed)
     assert "WARNING" in [e.type.value for e in r.events()]
     assert verify_session(res.session_dir).ok
@@ -231,6 +240,34 @@ def test_disk_budget_refuses_start(config: RecordConfig, tmp_path: Path) -> None
     with pytest.raises(DiskBudgetError):
         run(cfg, request(tmp_path), disk_usage=lambda p: SimpleNamespace(free=int(10e9)))
     assert sessions(tmp_path) == []
+
+
+def test_operator_stopped_take_does_not_preflight_fixed_duration(
+    config: RecordConfig, tmp_path: Path
+) -> None:
+    cfg = replace(
+        config,
+        disk=replace(
+            config.disk,
+            reserve_gb=20.0,
+            est_bytes_per_frame={"wrist": 3.5e6, "head": 3.5e6},
+        ),
+    )
+    rec = Recorder(
+        cfg,
+        request(tmp_path, duration_s=None, cameras=("wrist", "head")),
+        rs_module=FakeRS(),
+        rm_sdk=FakeRM(),
+        disk_usage=lambda p: SimpleNamespace(free=int(50e9)),
+        install_signal_handlers=False,
+    )
+    info = rec._check_disk(tmp_path, rec._camera_configs())
+    assert info["estimate_duration_s"] is None
+    assert info["estimated_session_bytes"] == 0
+    assert info["estimated_capacity_s"] is not None and info["estimated_capacity_s"] > 0
+    rec._disk_usage = lambda p: SimpleNamespace(free=int(10e9))
+    with pytest.raises(DiskBudgetError, match="reserve"):
+        rec._check_disk(tmp_path, rec._camera_configs())
 
 
 def test_disk_write_error_aborts(

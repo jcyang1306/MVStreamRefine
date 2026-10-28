@@ -5,8 +5,9 @@
 #   docker compose run --rm dev mvsr verify-session <session_id>
 #
 # Recording on the rig (USB + host network for RM65 at 192.168.1.19 + X11 preview):
-#   xhost +si:localuser:$USER        # only when using --preview
-#   docker compose run --rm rig mvsr record --cameras wrist --scenario SMOKE --object <name>
+#   xhost +si:localuser:$USER
+#   docker compose run --rm rig mvsr record --object <name> --gt constant_T_base_obj
+#   Preview is on by default (Q/ESC stop). Pass --no-preview for headless.
 #
 # Containers run as the host user so session files are not root-owned. UID/GID
 # default to 1000 (hkclr_user on CW20175); export UID GID to override.
@@ -43,11 +44,13 @@ services:
       MVSR_DATA_ROOT: /workspace/data
       MVSR_V1_ROOT: /v1
       HOME: /tmp
-      DISPLAY: ${DISPLAY:-:0}
+      DISPLAY: ${DISPLAY:-:1}
       QT_X11_NO_MITSHM: "1"
+      XAUTHORITY: ${XAUTHORITY}
     volumes:
       - .:/workspace
       - ./data:/workspace/data
       - ${MVSR_V1_HOST_ROOT:-./ref/MVStreamRefine}:/v1:ro
       - /dev/bus/usb:/dev/bus/usb
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY}:${XAUTHORITY}:ro

@@ -47,7 +47,7 @@ Conflicts are resolved by updating the master plan/contract in a separate archit
 ## 5. Releases and dependencies
 | Phase | Owned plan | Depends on | Runnable gate |
 |---|---|---|---|
-| P0 | `subplans/00_FOUNDATION.md` | none | unit-tested SE(3), contract types, session IO, `mvsr record` (D405 + optional D435 + RM65); owner-recorded sessions pass integrity checks |
+| P0 | `subplans/00_FOUNDATION.md` | none | unit-tested SE(3), contract types, session IO, `mvsr record` (D405 + D435 + RM65); one owner-recorded session passes `verify-session --p0-gate` |
 | P1 | `subplans/01_SENSORS.md` | P0 | replay to `SensorFrame` with clock mapping + interpolated robot poses; timing + hand-eye report |
 | P2 | `subplans/02_OBSERVATION.md` | P1 | masks, keypoint tracks and grounded 2D/3D matches |
 | P3 | `subplans/03_TRACKING.md` | P2 | moving-object relative pose on R-STATIC, R-MARKER and R-BOTH recordings |

@@ -17,7 +17,7 @@ Scenario codes are defined in ADR-0002. Each gate lists the minimum sessions it 
 | Object set | textured small object, low-texture geometric object, symmetric object, reflective object | shape GT object for at least one |
 
 ## Gates
-- **I-P0 (core + recorder):** owner records SMOKE, R-STATIC (wrist + head) and, recommended, R-CALIB with `mvsr record`; `verify-session` passes; drops all logged with reasons; capture/robot rates and raw timestamp field coverage reported; reader round-trip exact (details in `subplans/00_FOUNDATION.md`).
+- **I-P0 (core + recorder):** one operator-stopped `mvsr record` (default wrist+head, `R-STATIC`); `verify-session --p0-gate` passes (COMPLETE, wrist/robot frames present, head frames if recorded, drops logged, depth round-trip exact). Duration and fps are measured from the session, not pre-set. R-CALIB is recommended for I0, not required here. Details in `subplans/00_FOUNDATION.md`.
 - **I0 (core + sensors):** replay with clock mapping and interpolation; R-CALIB at 3 speeds: no unlogged drops, robot sample rate/jitter histogram, camera timestamp mapping residuals, estimated `dt_robot_cam`, board-in-base spread vs. speed (with/without interpolation and offset).
 - **I1 (sensors + observation):** same frame → reproducible mask and keypoint/track output for a fixed `mask_revision`; R-HARD clips for invalid depth, occlusion, object leaving frame.
 - **I2 (+ tracking):** R-STATIC: `T_base_obj(t)` spread (median/P95 translation, rotation); R-MARKER: RPE/ATE vs. board after fixed-gauge alignment; R-BOTH: failure %, degeneracy flags; output `T_cam_obj` and `T_base_obj`.

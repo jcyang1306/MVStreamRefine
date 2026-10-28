@@ -31,5 +31,5 @@ def _fixture(entry: dict[str, Any]) -> Any:
 )
 @pytest.mark.parametrize("entry", ENTRIES, ids=[e["session_id"] for e in ENTRIES])
 def test_registered_session_verifies(entry: dict[str, Any]) -> None:
-    rep = verify_session(_fixture(entry))
+    rep = verify_session(_fixture(entry), p0_gate=True)
     assert rep.ok, rep.errors

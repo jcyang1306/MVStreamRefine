@@ -86,6 +86,9 @@ def _camera_report(reader: SessionReader, cid: str) -> dict[str, Any]:
         "drops_by_reason": {k: v for k, v in sorted(by_status.items()) if k != "WRITTEN"},
         "arrival_fps": round((arrivals.size - 1) / span_s, 3) if span_s > 0 else None,
         "arrival_interval": _stats_ms(intervals),
+        "t_host_arrival_first_ns": int(arrivals[0]) if arrivals.size else None,
+        "t_host_arrival_last_ns": int(arrivals[-1]) if arrivals.size else None,
+        "capture_span_s": round(span_s, 6) if arrivals.size > 1 else None,
         "device_frame_number_gaps": {
             "frames_missing": int(np.clip(gaps - 1, 0, None).sum()) if gaps.size else 0,
             "max_gap": int(gaps.max()) if gaps.size else None,
@@ -125,10 +128,38 @@ def _robot_report(reader: SessionReader) -> dict[str, Any]:
     }
 
 
+def _measured_from_cameras(cameras: dict[str, Any]) -> dict[str, Any]:
+    """Duration and frame counts from the records, independent of any requested --duration."""
+    firsts = [
+        c["t_host_arrival_first_ns"]
+        for c in cameras.values()
+        if c.get("t_host_arrival_first_ns") is not None
+    ]
+    lasts = [
+        c["t_host_arrival_last_ns"]
+        for c in cameras.values()
+        if c.get("t_host_arrival_last_ns") is not None
+    ]
+    span = round((max(lasts) - min(firsts)) / 1e9, 6) if firsts and lasts else None
+    return {
+        "duration_s": span,
+        "cameras": {
+            cid: {
+                "frames_seen": c["frames_seen"],
+                "frames_written": c["frames_written"],
+                "arrival_fps": c["arrival_fps"],
+                "capture_span_s": c["capture_span_s"],
+            }
+            for cid, c in cameras.items()
+        },
+    }
+
+
 def inspect_session(session_dir: str | Path) -> dict[str, Any]:
     reader = SessionReader(session_dir, verify_checksums=False)
     m = reader.manifest
     events = reader.events()
+    cameras = {cid: _camera_report(reader, cid) for cid in reader.camera_ids}
     return {
         "session_id": m.get("session_id"),
         "status": m.get("status"),
@@ -137,9 +168,10 @@ def inspect_session(session_dir: str | Path) -> dict[str, Any]:
         "software": m.get("software"),
         "scenario": m.get("scenario"),
         "duration_s": m.get("duration_s"),
+        "measured": _measured_from_cameras(cameras),
         "stop_reason": m.get("stop_reason"),
         "errors": m.get("errors"),
-        "cameras": {cid: _camera_report(reader, cid) for cid in reader.camera_ids},
+        "cameras": cameras,
         "robot": _robot_report(reader),
         "events": {
             "counts": dict(Counter(e.type.value for e in events)),
@@ -159,7 +191,9 @@ def format_report(r: dict[str, Any]) -> str:
     sc = r.get("scenario") or {}
     out = [
         f"session {r['session_id']}  status={r['status']}  stop={r.get('stop_reason')}",
-        f"  created {r.get('created_utc')} on {r.get('host')}  duration {r.get('duration_s')} s",
+        f"  created {r.get('created_utc')} on {r.get('host')}  "
+        f"measured {(r.get('measured') or {}).get('duration_s')} s "
+        f"(manifest {r.get('duration_s')} s)",
         f"  scenario {sc.get('tags')} object={sc.get('object')!r} gt={sc.get('gt_type')} notes={sc.get('notes')!r}",
         f"  software {r.get('software')}",
     ]

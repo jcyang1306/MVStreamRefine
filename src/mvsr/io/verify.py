@@ -5,6 +5,8 @@ missing files, non-contiguous or duplicate `frame_id`, WRITTEN frame without ima
 disagreeing with records, calibration inconsistent with the manifest, robot `seq` gaps,
 events not bracketed by START/STOP, and (full mode) decoded pixels differing from the
 recorded raw hash or depth meters not equal to `raw * depth_units_m`.
+`--p0-gate` additionally requires wrist frames written, robot samples, and (if head was
+recorded) head frames written. Capture length, fps and robot Hz are measured, not gated.
 Warnings do not fail the check (e.g. hand-eye copy differs from the reference checksum).
 """
 
@@ -282,8 +284,34 @@ def _check_events(reader: SessionReader, rep: VerifyReport) -> None:
     rep.stats["events"] = dict(Counter(t.value for t in types))
 
 
+def apply_p0_gate(rep: VerifyReport, manifest: dict[str, Any]) -> None:
+    """Completeness for one operator-stopped take. No duration, fps, or robot-Hz targets."""
+    cameras = manifest.get("cameras") or {}
+    wrist_written = int(rep.stats.get("wrist.frames_written") or 0)
+    if "wrist" not in cameras or wrist_written < 1:
+        rep.errors.append("P0-gate: wrist.frames_written must be > 0")
+    if int(rep.stats.get("robot.samples") or 0) < 1:
+        rep.errors.append("P0-gate: robot.samples must be > 0")
+    if "head" in cameras and int(rep.stats.get("head.frames_written") or 0) < 1:
+        rep.errors.append("P0-gate: head was recorded but frames_written is 0")
+    rep.stats["p0_gate"] = {
+        "wrist_frames_written": wrist_written,
+        "head_frames_written": int(rep.stats.get("head.frames_written") or 0)
+        if "head" in cameras
+        else None,
+        "robot_samples": int(rep.stats.get("robot.samples") or 0),
+        "duration_not_gated": True,
+        "fps_not_gated": True,
+        "robot_hz_not_gated": True,
+    }
+
+
 def verify_session(
-    session_dir: str | Path, *, check_images: bool = True, workers: int = 8
+    session_dir: str | Path,
+    *,
+    check_images: bool = True,
+    workers: int = 8,
+    p0_gate: bool = False,
 ) -> VerifyReport:
     d = Path(session_dir)
     rep = VerifyReport(str(d), images_checked=check_images)
@@ -311,5 +339,7 @@ def verify_session(
             _check_images(reader, cid, records, manifest, rep, workers)
     _check_robot(reader, manifest, rep)
     _check_events(reader, rep)
+    if p0_gate:
+        apply_p0_gate(rep, manifest)
     rep.stats["status"] = manifest.get("status")
     return rep

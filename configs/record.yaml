@@ -38,11 +38,13 @@ robot:
   port: 8080
   source: poll                    # poll | udp; udp reconfigures the controller push target
                                   # (restored on exit) and is unverified on this controller
-  poll_hz: 100                    # PLACEHOLDER request rate; I-P0 target >= 50 Hz measured
+  poll_hz: 100                    # request rate; measured Hz is reported, not a P0 pass criterion
   udp_port: 8089                  # host UDP port for push mode (RealMan default)
   udp_cycle_5ms_units: 2          # push period in 5 ms units (RealMan protocol) -> 100 Hz; verify on rig
   udp_host_ip: null               # null = interface routing to the controller
   abort_after_failure_s: 5.0      # continuous read failures longer than this -> session ABORTED
+  poll_retries: 3                 # extra rm_get_current_arm_state attempts on ret=-1/-2 (timeout)
+  poll_retry_delay_s: 0.02        # wait between those attempts
 
 handeye:
   # Reference hand-eye calibration 2026-10-12 (ADR-0007), vendored byte-identical from
@@ -51,14 +53,13 @@ handeye:
   sha256: db07f1dd5cbc204c8a8d8f91c9d4025572d59fe4d54dcce5916f8d1a2d5fd61f
 
 disk:
-  reserve_gb: 20.0                # PLACEHOLDER free space kept on the data disk; refuse to start below
-                                  # reserve + estimate; stop cleanly (COMPLETE) when reached
+  reserve_gb: 20.0                # refuse to start if free < this; stop COMPLETE when reached during capture.
+                                  # operator-stopped takes (--duration omitted) are not pre-charged for 10 min
   est_bytes_per_frame:            # PLACEHOLDER from ADR-0003 (3-4 MB per 1280x720 RGB-D PNG pair)
     wrist: 3.5e+6                 # bytes; YAML 1.1 needs the exponent sign (3.5e6 is a string)
     head: 3.5e+6
-  estimate_duration_s: 600        # session length assumed for the start check when --duration is absent
   check_interval_s: 1.0           # free-space polling period during recording
 
 monitor:
   status_interval_s: 5.0          # console status line period
-  preview_max_width: 960          # px, preview window width (display only)
+  preview_max_width: 1600         # px, preview window width (wrist+head side by side)

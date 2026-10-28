@@ -1,6 +1,7 @@
 # Registered real sessions used by tests and gates (contracts/SESSION_FORMAT.md, ADR-0002).
 # Raw data lives under $MVSR_DATA_ROOT/sessions/<session_id>/ (not in git).
 # Add entries with: mvsr register-session <session_id> --used-by P0-gate [--gt <type>]
+# I-P0 needs one COMPLETE dual-cam take; extra historical sessions may remain listed.
 # A missing or checksum-mismatched fixture is SKIPPED in unit tests and BLOCKS a gate.
 #
 # Entry schema:

@@ -19,6 +19,7 @@ def test_shipped_config_types_and_values() -> None:
     assert all(isinstance(v, float) for v in cfg.disk.est_bytes_per_frame.values())
     assert isinstance(cfg.disk.reserve_gb, float) and isinstance(cfg.robot.poll_hz, float)
     assert cfg.robot.ip == "192.168.1.19" and cfg.robot.source == "poll"
+    assert cfg.robot.poll_retries == 3 and cfg.robot.poll_retry_delay_s == pytest.approx(0.02)
     assert cfg.handeye.sha256 == REFERENCE_HANDEYE_SHA256 and cfg.handeye_path().is_file()
 
 

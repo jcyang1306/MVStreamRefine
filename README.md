@@ -17,16 +17,17 @@ mkdir -p data                                   # $MVSR_DATA_ROOT (git-ignored)
 docker compose build dev rig                    # mvsr:cu121, mvsr:cu121-rig
 docker compose run --rm dev tools/check.sh      # ruff, mypy --strict core, pytest
 
-# record (robot is moved by the operator; the recorder only reads state)
-docker compose run --rm rig mvsr record --cameras wrist --scenario SMOKE --object <name> --duration 60
-docker compose run --rm rig mvsr record --cameras wrist,head --scenario R-STATIC --object <name> \
-    --gt constant_T_base_obj --duration 30
-#   --preview (needs `xhost +si:localuser:$USER`): SPACE pause/resume, A annotate, Q stop; Ctrl+C stops cleanly
+# one P0 take (robot is moved by the operator; the recorder only reads state).
+# Omit --duration; stop with Q in the preview or Ctrl+C. inspect-session counts frames from the records.
+xhost +si:localuser:$USER
+docker compose run --rm rig mvsr record --object <name> --gt constant_T_base_obj
+#   defaults: --cameras wrist,head --scenario R-STATIC, live preview on
+#   preview: SPACE pause/resume, A annotate, Q/ESC stop; --no-preview if headless
 
-docker compose run --rm dev mvsr inspect-session <session_id> [--json]   # rates, drops, jitter, coverage
-docker compose run --rm dev mvsr verify-session <session_id>             # all checksums + PNG round trip
+docker compose run --rm dev mvsr inspect-session <session_id> [--json]   # measured duration, frame counts, rates
+docker compose run --rm dev mvsr verify-session <session_id> --p0-gate   # integrity + P0 completeness (no fps target)
 docker compose run --rm dev mvsr register-session <session_id> --used-by P0-gate
-docker compose run --rm rig pytest -q tests/hardware --run-hardware       # 10 s live smoke tests
+docker compose run --rm rig pytest -q tests/hardware --run-hardware       # 10 s live pytest smokes (auto --duration)
 ```
 Recorder settings, units and placeholders: `configs/record.yaml`. The 2026-10-12 hand-eye file is
 vendored byte-identical at `configs/handeye/handeye_tf_20261012.txt` (sha256 pinned, ADR-0007).

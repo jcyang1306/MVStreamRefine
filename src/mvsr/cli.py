@@ -1,9 +1,10 @@
 """`mvsr` command line (subplans/00_FOUNDATION.md F0/F5).
 
     mvsr --version
-    mvsr record --cameras wrist[,head] --scenario SMOKE --object <name> [--duration S]
+    mvsr record --object <name> [--cameras wrist,head] [--scenario R-STATIC] [--gt TYPE]
+               # live preview on by default; --no-preview to disable
     mvsr inspect-session <session_id|path> [--json]
-    mvsr verify-session <session_id|path> [--fast] [--json]
+    mvsr verify-session <session_id|path> [--fast] [--json] [--p0-gate]
     mvsr register-session <session_id|path> --used-by P0-gate [--gt TYPE]
 
 Exit codes: 0 success, 1 check failed / session aborted, 2 usage or configuration error.
@@ -26,20 +27,41 @@ def _add_record(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
     p.add_argument(
         "--config", type=Path, default=None, help="recorder YAML (default configs/record.yaml)"
     )
-    p.add_argument("--cameras", default="wrist", help="comma list of wrist,head (default wrist)")
+    p.add_argument(
+        "--cameras",
+        default="wrist,head",
+        help="comma list of wrist,head (default wrist,head for the single P0 take)",
+    )
     p.add_argument("--wrist-fps", type=int, default=None, help="override wrist fps (default 30)")
     p.add_argument("--head-fps", type=int, default=None, help="override head fps (default 15)")
-    p.add_argument("--duration", type=float, default=None, help="stop after S seconds of capture")
+    p.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="optional auto-stop after S seconds; omit and stop with Ctrl+C / Q so length is operator-chosen",
+    )
     p.add_argument(
         "--scenario",
-        required=True,
-        help="comma list of scenario tags (ADR-0002), e.g. SMOKE or R-STATIC,R-CALIB",
+        default="R-STATIC",
+        help="comma list of scenario tags (ADR-0002); default R-STATIC for the P0 take",
     )
     p.add_argument("--object", dest="object_name", required=True, help="object name")
     p.add_argument("--gt", default=None, help="GT type, e.g. constant_T_base_obj")
     p.add_argument("--notes", default="", help="operator notes")
     p.add_argument("--robot-source", choices=["poll", "udp"], default=None)
-    p.add_argument("--preview", action="store_true", help="show the OpenCV preview window")
+    p.add_argument(
+        "--preview",
+        dest="preview",
+        action="store_true",
+        default=True,
+        help="show the OpenCV preview window (default on; Q/ESC stop, SPACE pause)",
+    )
+    p.add_argument(
+        "--no-preview",
+        dest="preview",
+        action="store_false",
+        help="record without a window (headless / hardware pytest)",
+    )
     p.add_argument("--start-paused", action="store_true", help="begin paused (SPACE resumes)")
     p.add_argument("--data-root", type=Path, default=None, help="override $MVSR_DATA_ROOT")
 
@@ -64,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_session_arg(p)
     p.add_argument("--fast", action="store_true", help="skip image hashing and PNG decoding")
     p.add_argument("--json", action="store_true", help="machine-readable report on stdout")
+    p.add_argument(
+        "--p0-gate",
+        action="store_true",
+        help="also require wrist frames, robot samples, and head frames if head was recorded (no fps/duration targets)",
+    )
     p.add_argument("--workers", type=int, default=8, help="threads for hashing/decoding")
 
     p = sub.add_parser("register-session", help="add a verified session to fixtures/registry.yaml")
@@ -101,7 +128,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     from mvsr.paths import resolve_session_dir
 
     path = resolve_session_dir(args.session, args.data_root and args.data_root.resolve())
-    report = verify_session(path, check_images=not args.fast, workers=args.workers)
+    report = verify_session(
+        path, check_images=not args.fast, workers=args.workers, p0_gate=args.p0_gate
+    )
     if args.json:
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
     else:

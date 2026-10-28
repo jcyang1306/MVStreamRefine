@@ -2,7 +2,9 @@
 
     docker compose run --rm rig pytest -q tests/hardware --run-hardware
 
-They record 10 s sessions into a temporary data root and require `verify-session` to pass.
+They record 10 s sessions into a temporary data root (`--duration` is only for this
+automated pytest; the operator P0 take has no preset length) and require
+`verify-session --p0-gate` to pass.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ def test_record_10s_verifies(tmp_path: Path, cameras: tuple[str, ...]) -> None:
     )
     res = run_recorder(load_record_config(), req, install_signal_handlers=False)
     assert res.status == "COMPLETE", res.errors
-    rep = verify_session(res.session_dir)
+    rep = verify_session(res.session_dir, p0_gate=True)
     assert rep.ok, rep.errors
     report = inspect_session(res.session_dir)
     for cid in cameras:

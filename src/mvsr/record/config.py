@@ -52,6 +52,8 @@ class RobotConfig:
     udp_cycle_5ms_units: int
     udp_host_ip: str | None
     abort_after_failure_s: float
+    poll_retries: int
+    poll_retry_delay_s: float
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,6 @@ class HandEyeConfig:
 class DiskConfig:
     reserve_gb: float
     est_bytes_per_frame: dict[str, float]
-    estimate_duration_s: float
     check_interval_s: float
 
 
@@ -177,5 +178,7 @@ def _validate(cfg: RecordConfig) -> None:
         raise ConfigError("robot.source must be poll|udp")
     if cfg.robot.poll_hz <= 0 or cfg.robot.abort_after_failure_s <= 0:
         raise ConfigError("robot.poll_hz and abort_after_failure_s must be > 0")
+    if cfg.robot.poll_retries < 0 or cfg.robot.poll_retry_delay_s < 0:
+        raise ConfigError("robot.poll_retries and poll_retry_delay_s must be >= 0")
     if cfg.disk.reserve_gb < 0 or cfg.disk.check_interval_s <= 0:
         raise ConfigError("disk.reserve_gb >= 0 and check_interval_s > 0 required")

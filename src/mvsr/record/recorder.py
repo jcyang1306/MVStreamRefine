@@ -7,7 +7,7 @@ assigned at arrival once recording is armed, including frames that are later dro
 every frame_id gets exactly one frames.jsonl record (`WRITTEN` or `DROPPED_<reason>`).
 The robot thread writes every state read to robot.jsonl. The recorder never moves the robot.
 
-Stop conditions: operator (Ctrl+C / SIGTERM / `q` in preview), `--duration`, disk reserve
+Stop conditions: operator (Ctrl+C / SIGTERM / `q` in preview), optional `--duration`, disk reserve
 reached (all -> COMPLETE); camera disconnect, robot failure > `abort_after_failure_s`, disk
 write error (-> ABORTED). The manifest is finalized in every case once the session exists.
 """
@@ -412,20 +412,28 @@ class Recorder:
 
     def _check_disk(self, root: Path, cams: dict[str, CameraConfig]) -> dict[str, Any]:
         d = self.config.disk
-        duration = self.request.duration_s or d.estimate_duration_s
-        estimate = sum(d.est_bytes_per_frame[c] * cam.fps * duration for c, cam in cams.items())
         reserve = d.reserve_gb * 1e9
         free = self._free_bytes(root)
+        bytes_per_s = sum(d.est_bytes_per_frame[c] * float(cam.fps) for c, cam in cams.items())
+        requested = self.request.duration_s
+        estimate = 0.0 if requested is None else bytes_per_s * requested
+        headroom = max(0.0, free - reserve)
         info = {
             "free_bytes_start": free,
             "reserve_bytes": int(reserve),
             "estimated_session_bytes": int(estimate),
-            "estimate_duration_s": duration,
+            "estimate_duration_s": requested,
+            "bytes_per_s": int(bytes_per_s),
+            "estimated_capacity_s": round(headroom / bytes_per_s, 1) if bytes_per_s > 0 else None,
         }
         if free < reserve + estimate:
+            extra = (
+                f" + estimate {estimate / 1e9:.1f} GB ({requested:.0f} s)"
+                if requested is not None
+                else ""
+            )
             raise DiskBudgetError(
-                f"free {free / 1e9:.1f} GB < reserve {reserve / 1e9:.1f} GB + estimate "
-                f"{estimate / 1e9:.1f} GB ({duration:.0f} s)"
+                f"free {free / 1e9:.1f} GB < reserve {reserve / 1e9:.1f} GB{extra}"
             )
         return info
 
@@ -527,6 +535,8 @@ class Recorder:
             udp_port=rcfg.udp_port,
             udp_cycle_5ms_units=rcfg.udp_cycle_5ms_units,
             udp_host_ip=rcfg.udp_host_ip,
+            poll_retries=rcfg.poll_retries,
+            poll_retry_delay_s=rcfg.poll_retry_delay_s,
             sdk=self._rm,
         )
         old_handlers: dict[int, Any] = {}
@@ -734,8 +744,14 @@ class Recorder:
                 next_status = now + mon.status_interval_s
                 log.info(" | ".join(lines))
             if preview is not None:
-                wrist = self.pipelines["wrist"].latest_rgb
-                key = preview.show(wrist, lines, recording=not self.paused.is_set())
+                views = {
+                    cid: self.pipelines[cid].latest_rgb
+                    for cid in ("wrist", "head")
+                    if cid in self.pipelines
+                }
+                key = preview.show(
+                    views.get("wrist"), lines, recording=not self.paused.is_set(), views=views
+                )
                 if key in ("q", "esc"):
                     self.request_stop("operator")
                 elif key == "space":

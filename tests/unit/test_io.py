@@ -25,7 +25,7 @@ from mvsr.io.records import FrameRecord, RawTiming, RobotRecord
 from mvsr.io.registry import load_registry, register_session, resolve_fixture
 from mvsr.io.session_reader import SessionReader
 from mvsr.io.session_writer import SessionWriter
-from mvsr.io.verify import verify_session
+from mvsr.io.verify import VerifyReport, apply_p0_gate, verify_session
 
 SID = "20261028T101500_CW20175_a3f1"
 H, W = 12, 16
@@ -256,7 +256,19 @@ def test_writer_reader_roundtrip(tmp_path: Path, reference_handeye_path: Path) -
     report = inspect_session(d)
     assert report["cameras"]["wrist"]["written_ratio"] == pytest.approx(10 / 12)
     assert report["robot"]["failures"] == 1
+    assert report["measured"]["cameras"]["wrist"]["frames_written"] == 10
     assert "session" in format_report(report)
+    gate = verify_session(d, p0_gate=True)
+    assert gate.ok and gate.stats["p0_gate"]["robot_samples"] == 4
+
+
+def test_p0_gate_requires_written_frames_and_robot_samples() -> None:
+    rep = VerifyReport("/tmp/none")
+    apply_p0_gate(rep, {"cameras": {"wrist": {}, "head": {}}})
+    joined = "\n".join(rep.errors)
+    assert "wrist.frames_written" in joined
+    assert "robot.samples" in joined
+    assert "head was recorded" in joined
 
 
 def test_checksum_mismatch_detected(tmp_path: Path, reference_handeye_path: Path) -> None:

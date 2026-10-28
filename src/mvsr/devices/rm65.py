@@ -93,12 +93,18 @@ class RM65StateSource:
         udp_cycle_5ms_units: int = 2,
         udp_host_ip: str | None = None,
         udp_first_packet_timeout_s: float = 2.0,
+        poll_retries: int = 3,
+        poll_retry_delay_s: float = 0.02,
         sdk: Any = None,
     ) -> None:
         if source not in ("poll", "udp"):
             raise ValueError(f"source must be poll or udp, got {source!r}")
         if poll_hz <= 0:
             raise ValueError("poll_hz must be > 0")
+        if poll_retries < 0:
+            raise ValueError("poll_retries must be >= 0")
+        if poll_retry_delay_s < 0:
+            raise ValueError("poll_retry_delay_s must be >= 0")
         self.ip, self.port = str(ip), int(port)
         self.sink = sink
         self.source = source
@@ -108,6 +114,8 @@ class RM65StateSource:
         self.udp_cycle = int(udp_cycle_5ms_units)
         self.udp_host_ip = udp_host_ip
         self.udp_first_packet_timeout_s = float(udp_first_packet_timeout_s)
+        self.poll_retries = int(poll_retries)
+        self.poll_retry_delay_s = float(poll_retry_delay_s)
         self._sdk = sdk
         self._arm: Any = None
         self._seq = 0
@@ -158,6 +166,8 @@ class RM65StateSource:
         info["software_info"] = _jsonable(sw) if ret == 0 else {"error": f"ret={ret}"}
         if self.source == "poll":
             info["nominal_rate_hz"] = self.poll_hz
+            info["poll_retries"] = self.poll_retries
+            info["poll_retry_delay_s"] = self.poll_retry_delay_s
         else:
             info["nominal_rate_hz"] = 1000.0 / (5.0 * self.udp_cycle)
             info["udp"] = {"port": self.udp_port, "cycle_5ms_units": self.udp_cycle}
@@ -253,22 +263,45 @@ class RM65StateSource:
                 st.last_error = error
         self.sink(rec)
 
-    def _poll_loop(self) -> None:
-        next_t = time.monotonic()
-        while not self._stop.is_set():
-            t0 = time.monotonic_ns()
+    def _read_arm_state(self) -> tuple[int, int, Any | None, str | None]:
+        """One poll cycle: retry transient SDK failures; stamp is the successful request midpoint.
+
+        RealMan `rm_get_current_arm_state` ret=-1 (send) / -2 (recv/timeout) are treated as
+        transient. A recovered read is emitted as a normal sample (no failure record). Exhausted
+        retries still produce a failed `RobotRecord` so the session log stays complete.
+        """
+        last_error: str | None = None
+        t_first = time.monotonic_ns()
+        t1 = t_first
+        attempts = self.poll_retries + 1
+        for i in range(attempts):
+            t_req = time.monotonic_ns()
             try:
                 ret, state = self._arm.rm_get_current_arm_state()
                 t1 = time.monotonic_ns()
-                if int(ret) != 0:
-                    self._emit(
-                        (t0 + t1) // 2, None, None, t1 - t0, f"rm_get_current_arm_state ret={ret}"
-                    )
-                else:
-                    self._emit((t0 + t1) // 2, state.get("joint"), state.get("pose"), t1 - t0, None)
-            except Exception as exc:  # SDK/network failure: logged as a failed sample
+                if int(ret) == 0:
+                    return t_req, t1, state, None
+                last_error = f"rm_get_current_arm_state ret={ret}"
+                transient = int(ret) in (-1, -2)
+            except Exception as exc:
                 t1 = time.monotonic_ns()
-                self._emit((t0 + t1) // 2, None, None, t1 - t0, f"{type(exc).__name__}: {exc}")
+                last_error = f"{type(exc).__name__}: {exc}"
+                transient = True
+            if (not transient) or i + 1 == attempts or self._stop.is_set():
+                return t_first, t1, None, last_error
+            if self._stop.wait(self.poll_retry_delay_s):
+                return t_first, time.monotonic_ns(), None, last_error
+        return t_first, time.monotonic_ns(), None, last_error
+
+    def _poll_loop(self) -> None:
+        next_t = time.monotonic()
+        while not self._stop.is_set():
+            t0, t1, state, error = self._read_arm_state()
+            if error is None:
+                assert state is not None
+                self._emit((t0 + t1) // 2, state.get("joint"), state.get("pose"), t1 - t0, None)
+            else:
+                self._emit((t0 + t1) // 2, None, None, t1 - t0, error)
             next_t += self.poll_period_s
             now = time.monotonic()
             if next_t < now:  # overrun: do not burst to catch up
