@@ -24,9 +24,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /workspace
 
+# P2 segmentation (ADR-0006): torch pinned to cu121 before sam2-inference, which is
+# vendored from V1 under third_party/sam2-inference (Apache-2.0, inference only).
+FROM base AS torch-deps
+COPY third_party/sam2-inference /tmp/sam2-inference
+RUN python3 -m pip install torch==2.5.1 torchvision==0.20.1 \
+      --index-url https://download.pytorch.org/whl/cu121 \
+ && python3 -m pip install /tmp/sam2-inference \
+ && python3 -c "import torch, sam2, sam2_inference; print('torch', torch.__version__, 'sam2-inference OK')" \
+ && rm -rf /tmp/sam2-inference
+
 # Dependencies only (cached independently of source changes): install the project
 # from a stub package to resolve [dev] deps, then remove the stub.
-FROM base AS dev-deps
+FROM torch-deps AS dev-deps
 COPY pyproject.toml requirements.lock /tmp/mvsr-deps/
 RUN mkdir -p /tmp/mvsr-deps/src/mvsr \
  && touch /tmp/mvsr-deps/src/mvsr/__init__.py \

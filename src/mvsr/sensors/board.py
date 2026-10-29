@@ -26,8 +26,17 @@ import cv2
 import numpy as np
 import numpy.typing as npt
 
+from mvsr.calib.intrinsics import undistort_normalized, undistort_pixels
 from mvsr.core.errors import ContractValidationError
 from mvsr.core.se3 import PoseSE3
+
+__all__ = [
+    "BoardSpec",
+    "detect_corners",
+    "solve_board_pose",
+    "undistort_normalized",
+    "undistort_pixels",
+]
 
 F64 = npt.NDArray[np.float64]
 MARKER_FRAME = "marker"
@@ -58,40 +67,6 @@ class BoardSpec:
         pts = np.stack([c.ravel(), r.ravel(), np.zeros(r.size)], axis=1).astype(np.float64)
         out: F64 = pts * self.square_m
         return out
-
-
-# --------------------------------------------------------------------------- intrinsics
-
-
-def undistort_normalized(uv: npt.ArrayLike, K: F64, model: str, coeffs: npt.ArrayLike) -> F64:
-    """Pixels `(N, 2)` -> undistorted normalized image coordinates `(N, 2)`."""
-    px = np.asarray(uv, dtype=np.float64).reshape(-1, 2)
-    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
-    x = (px[:, 0] - cx) / fx
-    y = (px[:, 1] - cy) / fy
-    k = np.asarray(coeffs, dtype=np.float64)
-    if not np.any(k) or model == "none":
-        return np.stack([x, y], axis=1)
-    if model == "inverse_brown_conrady":
-        k1, k2, p1, p2, k3 = k
-        r2 = x * x + y * y
-        f = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
-        ux = x * f + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
-        uy = y * f + 2.0 * p2 * x * y + p1 * (r2 + 2.0 * y * y)
-        return np.stack([ux, uy], axis=1)
-    if model == "brown_conrady":
-        und = cv2.undistortPoints(px.reshape(-1, 1, 2), K, k)
-        out: F64 = und.reshape(-1, 2).astype(np.float64)
-        return out
-    raise ContractValidationError(
-        f"unsupported distortion model {model!r} with non-zero coefficients"
-    )
-
-
-def undistort_pixels(uv: npt.ArrayLike, K: F64, model: str, coeffs: npt.ArrayLike) -> F64:
-    n = undistort_normalized(uv, K, model, coeffs)
-    out: F64 = np.stack([K[0, 0] * n[:, 0] + K[0, 2], K[1, 1] * n[:, 1] + K[1, 2]], axis=1)
-    return out
 
 
 def project_points(T_cam_marker: PoseSE3, points_marker: F64, K: F64) -> F64:

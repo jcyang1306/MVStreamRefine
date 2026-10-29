@@ -26,6 +26,9 @@ services:
       MVSR_DATA_ROOT: /workspace/data
       MVSR_V1_ROOT: /v1
       HOME: /tmp
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    shm_size: "4gb"
     volumes:
       - .:/workspace
       - ./data:/workspace/data

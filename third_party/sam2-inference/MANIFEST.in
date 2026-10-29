@@ -1,0 +1,7 @@
+include Dockerfile
+include LICENSE
+include LICENSE_cctorch
+recursive-include examples *.py
+recursive-include tests *.py
+recursive-include src/sam2/configs *.yaml
+recursive-include src/sam2/csrc *.cu

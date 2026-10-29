@@ -23,6 +23,7 @@
   object: cup
   used_by:
   - I0
+  - I1
   - P0-gate
 - session_id: 20261028T083612_CW20175_5bf8
   manifest_sha256: 1274d2fa65347b8e5f2637e16fbcddd33c35c681a76cea0e6c08bb804bcca999

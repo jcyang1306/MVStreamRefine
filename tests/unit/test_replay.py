@@ -45,18 +45,29 @@ def tcp_x(t_ns: int) -> float:
     return 0.3 + 0.001 * (t_ns - T_FRAME0) / 10_000_000
 
 
-def make_session(root: Path, handeye_path: Path, n: int = 10) -> Path:
+def make_session(
+    root: Path,
+    handeye_path: Path,
+    n: int = 10,
+    *,
+    gt_type: str | None = None,
+    size: tuple[int, int] = (W, H),
+    images: Any = None,
+    dropped: tuple[int, ...] = DROPPED,
+) -> Path:
+    """`images(i) -> (rgb uint8 HxWx3, depth uint16 HxW)`; default seeded noise."""
     he = load_handeye(handeye_path)
+    w_px, h_px = size
     bundle = build_bundle(
         camera_id="wrist",
         camera_serial="323622271240",
         camera_model="Intel RealSense D405",
-        width=W,
-        height=H,
-        fx=20.0,
-        fy=20.0,
-        cx=7.5,
-        cy=5.5,
+        width=w_px,
+        height=h_px,
+        fx=20.0 * w_px / W,
+        fy=20.0 * w_px / W,
+        cx=(w_px - 1) / 2.0,
+        cy=(h_px - 1) / 2.0,
         distortion_model="inverse_brown_conrady",
         distortion=[0.0] * 5,
         depth_units_m=1e-4,
@@ -71,7 +82,7 @@ def make_session(root: Path, handeye_path: Path, n: int = 10) -> Path:
             "start": {"realtime_ns": R0, "monotonic_ns": M0, "uncertainty_ns": 100},
             "end": {"realtime_ns": R0 + 10**10, "monotonic_ns": M0 + 10**10, "uncertainty_ns": 100},
         },
-        "scenario": {"tags": ["R-STATIC"], "object": "test", "gt_type": None, "notes": ""},
+        "scenario": {"tags": ["R-STATIC"], "object": "test", "gt_type": gt_type, "notes": ""},
         "disk": {},
     }
     w = SessionWriter(root, SID, manifest)
@@ -90,7 +101,7 @@ def make_session(root: Path, handeye_path: Path, n: int = 10) -> Path:
             "exposure_mode",
         )
     }
-    entry.update(mount="wrist", resolution=[W, H], post_filters=[])
+    entry.update(mount="wrist", resolution=[w_px, h_px], post_filters=[])
     w.add_camera("wrist", bundle, {"device": {}}, entry)
     w.log_event(EventType.START, {}, t_host_ns=M0 + 900_000_000)
     rng = np.random.default_rng(7)
@@ -106,7 +117,7 @@ def make_session(root: Path, handeye_path: Path, n: int = 10) -> Path:
             rs_frame_number=i,
         )
         arrival = mid + 28_000_000 + (i % 3) * 1_000_000
-        if i in DROPPED:
+        if i in dropped:
             w.record_frame(
                 "wrist",
                 FrameRecord(
@@ -114,8 +125,11 @@ def make_session(root: Path, handeye_path: Path, n: int = 10) -> Path:
                 ),
             )
             continue
-        color = rng.integers(0, 256, (H, W, 3), dtype=np.uint8)
-        depth = rng.integers(1, 5000, (H, W), dtype=np.uint16)
+        if images is None:
+            color = rng.integers(0, 256, (h_px, w_px, 3), dtype=np.uint8)
+            depth = rng.integers(1, 5000, (h_px, w_px), dtype=np.uint16)
+        else:
+            color, depth = images(i)
         refs = w.write_images("wrist", i, color, depth)
         w.record_frame("wrist", FrameRecord(i, FrameStatus.WRITTEN, arrival, timing, *refs))
     for seq, ms in enumerate(ROBOT_MS):

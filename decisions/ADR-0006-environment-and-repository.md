@@ -27,3 +27,9 @@ Status: Accepted (owner confirmed 2026-10-27). Date: 2026-10-27.
 - Internal types: frozen `dataclasses` with explicit validators (no pydantic). JSON metadata via stdlib; arrays via NPZ; images via PNG (`opencv-python-headless`).
 - P0 runtime deps: `numpy`, `pyyaml`, `opencv-python` (PNG IO and the optional preview window), `pyrealsense2>=2.54,<3`, `Robotic_Arm==1.1.6` (recorder, ADR-0007); `scipy` test-only. Later phases add `open3d`, `torch==2.5.1+cu121`, `sam2-inference` (vendored from V1). All pinned in `requirements.lock` after the first green build.
 - Workstation OS is Ubuntu 20.04; everything runs in the Ubuntu 22.04 image, so host Python/library versions do not matter.
+
+## Amendment (2026-10-29, P2)
+- The Dockerfile has a `torch-deps` stage below `dev-deps`: `torch==2.5.1` / `torchvision==0.20.1` from the cu121 index, then `third_party/sam2-inference` (vendored byte-for-byte from V1 `src/segmention/sam2`, V1 commit `10006e3`, Apache-2.0; inference only). Both `dev` and `rig` images contain it (≈ 9.4 GB).
+- The GPU is reached through the default `nvidia` Docker runtime (`NVIDIA_VISIBLE_DEVICES=all` on the `dev` service); no compose device reservation is needed on CW20175.
+- SAM 2.1 weights are not in git: `checkpoints/sam2.1_hiera_tiny.pt` (copied from V1 `checkpoints/`, git-ignored) with sha256 `7402e0d8…be69` pinned in `configs/observation.yaml`; a mismatch refuses segmentation.
+- `torch` / `sam2_inference` are imported lazily; tests that need them skip without a GPU or checkpoint.

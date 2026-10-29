@@ -9,6 +9,10 @@
     mvsr replay <session_id|path> [--camera wrist] [--speed S] [--limit N]        # P1
     mvsr sensors-report <session_id ...> [--square-mm F] [--stride N]           # P1, writes runs/
     mvsr i0-gate [<session_id ...>]                       # P1 gate (default: registry used_by I0)
+    mvsr segment <session_id|path> (--box X1 Y1 X2 Y2 | --select)                  # P2 masks
+    mvsr masks <session_id|path>
+    mvsr observe-report <session_id ...> [--mask-revision R]       # P2 benchmark -> runs/
+    mvsr i1-gate [<session_id ...>]                       # P2 gate (default: registry used_by I1)
 
 Exit codes: 0 success, 1 check failed / session aborted, 2 usage or configuration error.
 """
@@ -145,6 +149,170 @@ def _add_p1(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             help="evaluate with this hand-eye file instead of the copy stored in the session",
         )
         p.add_argument("--json", action="store_true", help="print the full JSON report")
+    _add_p2(sub)
+
+
+def _add_p2(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    p = sub.add_parser("segment", help="SAM 2.1 masks for a session -> derived/masks (P2)")
+    _add_session_arg(p)
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument(
+        "--box", type=float, nargs=4, metavar=("X1", "Y1", "X2", "Y2"), help="xyxy prompt (px)"
+    )
+    g.add_argument(
+        "--select", action="store_true", help="draw the box on the prompt frame (needs X11: rig)"
+    )
+    p.add_argument(
+        "--point",
+        type=float,
+        nargs=3,
+        action="append",
+        metavar=("X", "Y", "LABEL"),
+        help="extra point prompt, label 1=object 0=background",
+    )
+    p.add_argument(
+        "--frame-id", type=int, default=None, help="prompt frame (default: first emitted)"
+    )
+    p.add_argument("--limit", type=int, default=None, help="segment only N frames")
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="observation YAML (default configs/observation.yaml)",
+    )
+
+    p = sub.add_parser("masks", help="list complete mask revisions of a session")
+    _add_session_arg(p)
+
+    for name, helptext in (
+        ("observe-report", "observation benchmark (P2 O6) -> data/runs/"),
+        ("i1-gate", "I1 gate: observation benchmark + decision (default: registry used_by I1)"),
+    ):
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument(
+            "sessions", nargs="*" if name == "i1-gate" else "+", help="session ids or dirs"
+        )
+        p.add_argument("--data-root", type=Path, default=None, help="override $MVSR_DATA_ROOT")
+        p.add_argument("--mask-revision", default=None, help="default: the only complete revision")
+        p.add_argument("--limit", type=int, default=None, help="observe only N frames")
+        p.add_argument("--config", type=Path, default=None, help="observation YAML")
+        p.add_argument("--json", action="store_true", help="print the full JSON report")
+
+
+def _cmd_segment(args: argparse.Namespace) -> int:
+    from mvsr.observation.config import load_observation_config
+    from mvsr.observation.segmentation import MaskPrompt, segment_session
+    from mvsr.paths import resolve_session_dir
+
+    path = resolve_session_dir(args.session, args.data_root and args.data_root.resolve())
+    box, source = (
+        (tuple(args.box), "cli_box")
+        if args.box
+        else (_select_box(path, args.frame_id), "interactive_roi")
+    )
+    pts = [(p[0], p[1]) for p in args.point] if args.point else None
+    labels = [int(p[2]) for p in args.point] if args.point else None
+    prompt = MaskPrompt(
+        frame_id=args.frame_id,
+        box_xyxy=box,
+        points=None if pts is None else tuple(pts),
+        labels=None if labels is None else tuple(labels),
+        source=source,
+    )
+
+    def progress(k: int, n: int) -> None:
+        if k == n or k % 100 == 0:
+            print(f"  segmented {k}/{n}", file=sys.stderr, flush=True)
+
+    meta = segment_session(
+        path, prompt, load_observation_config(args.config), limit=args.limit, progress=progress
+    )
+    out = {k: meta[k] for k in ("mask_revision", "frames", "by_status", "fps", "wall_s", "runtime")}
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0
+
+
+def _select_box(path: Path, frame_id: int | None) -> tuple[float, float, float, float]:
+    import cv2
+
+    from mvsr.sensors.replay import ReplaySource
+
+    src = ReplaySource(path)
+    fid = src.frame_ids[0] if frame_id is None else frame_id
+    rgb = src.reader.read_frame("wrist", fid).color_rgb_u8
+    title = f"prompt frame {fid}: drag a box, ENTER to accept"
+    x, y, w, h = cv2.selectROI(title, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), showCrosshair=True)
+    cv2.destroyAllWindows()
+    if w <= 0 or h <= 0:
+        raise ValueError("no box selected")
+    return float(x), float(y), float(x + w), float(y + h)
+
+
+def _cmd_masks(args: argparse.Namespace) -> int:
+    from mvsr.observation.masks import MaskCache, list_revisions
+    from mvsr.paths import resolve_session_dir
+
+    path = resolve_session_dir(args.session, args.data_root and args.data_root.resolve())
+    for rev in list_revisions(path):
+        m = MaskCache(path, rev).revision_meta
+        prompt = (m.get("params") or {}).get("prompt")
+        print(f"{rev}  frames={m.get('frames')} by_status={m.get('by_status')} prompt={prompt}")
+    return 0
+
+
+def _pick_revision(path: Path, requested: str | None) -> str:
+    from mvsr.observation.masks import list_revisions
+
+    if requested:
+        return str(requested)
+    revs = list_revisions(path)
+    if len(revs) != 1:
+        raise ValueError(f"{path.name}: pass --mask-revision (complete revisions: {revs})")
+    return revs[0]
+
+
+def _cmd_observe(args: argparse.Namespace) -> int:
+    from mvsr.observation.benchmark import i1_decision, run_benchmark, write_run
+    from mvsr.observation.config import load_observation_config
+    from mvsr.paths import resolve_session_dir
+
+    root = args.data_root and args.data_root.resolve()
+    cfg = load_observation_config(args.config)
+    sessions = list(args.sessions)
+    scen: list[list[str]] = []
+    if args.command == "i1-gate" and not sessions:
+        from mvsr.io.registry import load_registry
+
+        entries = [e for e in load_registry() if "I1" in e["used_by"]]
+        sessions = [e["session_id"] for e in entries]
+        scen = [list(e["scenario"]) for e in entries]
+        if not sessions:
+            print("I1 decision: BLOCKED (no registry sessions used_by I1)", file=sys.stderr)
+            return 1
+    reports = []
+    for s in sessions:
+        path = resolve_session_dir(s, root)
+        rep = run_benchmark(path, _pick_revision(path, args.mask_revision), cfg, limit=args.limit)
+        reports.append(rep)
+        if not scen or len(scen) < len(reports):
+            scen.append(list((rep["scenario"] or {}).get("tags") or []))
+    decision = i1_decision(reports, scen, cfg) if args.command == "i1-gate" else None
+    run_dir = write_run(reports, decision, cfg, root)
+    if args.json:
+        print(
+            json.dumps(
+                {"sessions": reports, "i1": decision, "run_dir": str(run_dir)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        from mvsr.observation.report import format_report
+
+        print(format_report(reports, decision, run_dir))
+    if args.command == "i1-gate":
+        return 1 if decision is None or decision["decision"] == "BLOCKED" else 0
+    return 0
 
 
 def _cmd_record(args: argparse.Namespace) -> int:
@@ -316,6 +484,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "replay": _cmd_replay,
         "sensors-report": _cmd_sensors_report,
         "i0-gate": _cmd_sensors_report,
+        "segment": _cmd_segment,
+        "masks": _cmd_masks,
+        "observe-report": _cmd_observe,
+        "i1-gate": _cmd_observe,
     }
     from mvsr.core.errors import MvsrError
 

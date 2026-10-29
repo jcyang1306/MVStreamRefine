@@ -1,0 +1,69 @@
+# P2 observation configuration (subplans/02_OBSERVATION.md): segmentation, depth preprocessing,
+# features, tracks, correspondences, benchmark and the I1 gate. Each value: unit, source,
+# failure behaviour. PLACEHOLDER = chosen before measurement; revise from `mvsr observe-report`.
+
+sam2:
+  checkpoint: checkpoints/sam2.1_hiera_tiny.pt   # copied from V1 checkpoints/ (git-ignored)
+  checkpoint_sha256: 7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69  # mismatch -> refused
+  model_type: tiny                      # tiny | small | base_plus | large (sam2-inference)
+  device: cuda                          # cuda | cpu | auto
+  memory_frames: null                   # null = sam2-inference default (num_maskmem + 2, >= 8 frames)
+  min_mask_area_px: 400                 # PLACEHOLDER: smaller masks -> status EMPTY (object not seen)
+  low_confidence_score: 0.6             # PLACEHOLDER: mean sigmoid(logit) inside the mask below this -> LOW_CONFIDENCE
+
+depth:
+  min_depth_m: 0.07                     # D405 optimal range 7-50 cm (MASTER_PLAN.md)
+  max_depth_m: 0.60                     # beyond: outside the object workspace for this rig
+  mask_erode_px: 3                      # mask boundary pixels mix object and background depth
+  edge_jump_rel: 0.02                   # |z - z_4neighbour| > rel * z -> depth discontinuity / flying pixel (removed)
+  noise_k: 3.0                          # 3x3 local std > k * sigma(z) -> noisy (removed)
+  sigma_a_m: 0.0010                     # PLACEHOLDER depth noise sigma(z) = a + b z^2; at 0.37 m = 2.6 mm,
+  sigma_b_per_m: 0.0120                 # matching the P1 board plane-distance median 2.2 mm at 0.33-0.41 m
+  point_stride: 1                       # every Nth geometry pixel (row-major) becomes a 3D point
+
+features:
+  type: orb                             # orb is the baseline; other extractors implement features.FeatureExtractor
+  n_features: 1500                      # ORB cap per frame inside the safe foreground
+  fast_threshold: 7                     # PLACEHOLDER: low, the cup is nearly textureless
+  scale_factor: 1.2
+  n_levels: 8
+  edge_threshold: 19                    # ORB border (px); >= patch_size / 2 + 3
+  patch_size: 31
+  safe_erode_px: 6                      # keypoints only this far inside the mask (no background corners)
+
+tracks:
+  klt_window_px: 21
+  klt_levels: 3
+  fb_max_px: 1.0                        # forward-backward error above this -> point not tracked this frame
+  max_occluded_frames: 5                # invisible longer than this -> RETIRED (id never reused)
+  target_tracks: 400                    # new ORB tracks are spawned until this many are visible
+  min_spacing_px: 8                     # new tracks keep this distance to visible ones
+  max_descriptor_drift_bits: 64         # Hamming bits (of 256) from the birth descriptor -> RETIRED; null = off.
+                                        # TUNED on 9fb3 (500 frames): drift of >100-frame tracks 13.2 -> 6.7 px
+                                        # median (reference floor ~7 px), visible tracks 170 -> 120 per frame
+
+correspondence:
+  ratio: 0.8                            # Lowe ratio for ORB descriptor matching (+ mutual check)
+  max_hamming: 64
+  sigma_px: 1.0                         # PLACEHOLDER isotropic keypoint std-dev (px)
+  ransac_iterations: 500
+  ransac_rigid_m: 0.006                 # PLACEHOLDER 3D residual for the screening model (~2 sigma at 0.4 m)
+  ransac_epipolar_px: 2.0               # Sampson distance for matches without depth on both sides
+  min_model_matches: 6                  # fewer 3D-3D matches -> no rigid model, essential-matrix screening
+  seed: 0
+
+benchmark:
+  frame_gaps: [1, 5, 15, 30]            # frame-id distance of evaluated pairs
+  pair_stride: 10                       # evaluate every Nth source frame per gap
+  true_match_m: 0.010                   # PLACEHOLDER: |p_j - T_ref p_i| below this = correct (prior spread p95 3.8 mm)
+  true_match_px: 8.0                    # PLACEHOLDER: same for matches with only source depth
+  mask_sample_points: 2000              # geometry points per frame projected into later masks
+  reproducibility_frames: 60            # frames observed twice for the I1 determinism check
+
+gate:
+  # I1 (INTEGRATION_PLAN.md). Hard checks -> BLOCKED; soft targets (PLACEHOLDER) -> PASS-WITH-LIMITS.
+  min_mask_coverage: 0.95               # hard: emitted frames with a cached mask
+  min_mask_agreement: 0.85              # soft: median fraction of frame-i object points inside mask i+gap (gap 5)
+  min_valid_depth_ratio: 0.6            # soft: median valid depth inside the mask
+  min_match_precision: 0.8              # soft: inlier precision vs. the robot reference (gap 5)
+  min_tracked_keypoints: 30             # soft: median visible tracks per frame

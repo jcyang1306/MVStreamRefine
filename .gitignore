@@ -2,6 +2,8 @@
 ref/
 # Recorded sessions and processing outputs live under $MVSR_DATA_ROOT (default ./data).
 data/
+# Model weights (sha256 pinned in configs/observation.yaml; copied from V1 checkpoints/).
+checkpoints/
 output/
 outputs/
 runs/

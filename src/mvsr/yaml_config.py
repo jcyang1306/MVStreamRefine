@@ -18,6 +18,11 @@ def typed_value(value: Any, tp: Any, where: str) -> Any:
             return None
         (inner,) = [a for a in get_args(tp) if a is not type(None)]
         return typed_value(value, inner, where)
+    if origin is list:
+        if not isinstance(value, list):
+            raise ConfigError(f"{where}: expected a list")
+        (it,) = get_args(tp)
+        return [typed_value(v, it, f"{where}[{i}]") for i, v in enumerate(value)]
     if origin is dict:
         if not isinstance(value, dict):
             raise ConfigError(f"{where}: expected a mapping")

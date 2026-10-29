@@ -43,6 +43,17 @@ for frame in ReplaySource("data/sessions/<session_id>"):   # wrist by default
 ```
 Settings and placeholders: `configs/sensors.yaml`; evidence and limits: `subplans/01_SENSORS.md`.
 
+## P2 usage (observation: masks, depth geometry, features, tracks, correspondences)
+```bash
+cp ref/MVStreamRefine/checkpoints/sam2.1_hiera_tiny.pt checkpoints/          # once; sha256 pinned
+docker compose run --rm dev mvsr segment <session_id> --box X1 Y1 X2 Y2       # SAM 2.1 -> derived/masks
+docker compose run --rm rig mvsr segment <session_id> --select                # draw the box (X11)
+docker compose run --rm dev mvsr masks <session_id>                           # list mask revisions
+docker compose run --rm dev mvsr observe-report <session_id>                  # benchmark -> data/runs/
+docker compose run --rm dev mvsr i1-gate                                      # I1 on registry used_by I1
+```
+Settings and placeholders: `configs/observation.yaml`; evidence and limits: `subplans/02_OBSERVATION.md`.
+
 Recorder settings, units and placeholders: `configs/record.yaml`. The hand-eye reference is
 `configs/handeye/handeye_tf_20261028.txt` (from `calibration_result.json`, sha256 pinned, ADR-0007). The 2026-10-12 file remains for sessions that already copied it.
 

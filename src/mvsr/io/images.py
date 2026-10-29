@@ -45,6 +45,27 @@ def encode_png_u16(depth: npt.NDArray[np.uint16], level: int = DEFAULT_PNG_COMPR
     return buf.tobytes()
 
 
+def encode_png_mask(mask: npt.NDArray[np.bool_], level: int = DEFAULT_PNG_COMPRESSION) -> bytes:
+    """Binary mask -> 8-bit single-channel PNG with values 0 / 255 (SESSION_FORMAT.md)."""
+    if mask.dtype != np.bool_ or mask.ndim != 2:
+        raise ValueError(f"mask must be bool HxW, got {mask.dtype} {mask.shape}")
+    img = np.where(mask, np.uint8(255), np.uint8(0))
+    ok, buf = cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, int(level)])
+    if not ok:
+        raise SessionFormatError("PNG encode failed (mask)")
+    return buf.tobytes()
+
+
+def decode_png_mask(data: bytes) -> npt.NDArray[np.bool_]:
+    img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if img is None or img.dtype != np.uint8 or img.ndim != 2:
+        shape = None if img is None else (img.dtype, img.shape)
+        raise SessionFormatError(f"mask PNG is not 8-bit single channel: {shape}")
+    if not np.isin(img, (0, 255)).all():
+        raise SessionFormatError("mask PNG must contain only 0 and 255")
+    return img == 255
+
+
 def decode_png_rgb(data: bytes) -> npt.NDArray[np.uint8]:
     img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
     if img is None or img.dtype != np.uint8 or img.ndim != 3 or img.shape[2] != 3:
