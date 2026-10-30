@@ -6,7 +6,8 @@ the object pose, the model exists only to reject outliers):
 - with >= `min_model_matches` pairs that have depth on both sides, a rigid model
   `p_tgt = R p_src + t` is fitted by deterministic RANSAC (seeded) + Kabsch refit;
   both-depth pairs pass with a 3D residual `<= ransac_rigid_m`, one-sided pairs with a
-  reprojection error `<= ransac_epipolar_px`, no-depth pairs with a Sampson distance
+  reprojection error `<= ransac_reproj_px` (includes the error of the one depth), no-depth
+  pairs with a Sampson distance
   `<= ransac_epipolar_px` under `E = [t]x R`;
 - otherwise the essential matrix (OpenCV RANSAC, normalized coordinates) screens all pairs;
 - fewer than 8 pairs and no rigid model: every pair is rejected `NO_MODEL`.
@@ -239,7 +240,7 @@ def match_observations(
                 )
                 err[good] = np.linalg.norm(pred - ut, axis=1)
             for idx, e in zip(np.nonzero(only_s)[0], err, strict=True):
-                ok = e <= cfg.ransac_epipolar_px
+                ok = e <= cfg.ransac_reproj_px
                 inlier[idx], reason[idx] = ok, None if ok else "REPROJECTION"
         only_t = dt & ~ds
         if only_t.any():
@@ -257,7 +258,7 @@ def match_observations(
                 )
                 err[good] = np.linalg.norm(pred - us, axis=1)
             for idx, e in zip(np.nonzero(only_t)[0], err, strict=True):
-                ok = e <= cfg.ransac_epipolar_px
+                ok = e <= cfg.ransac_reproj_px
                 inlier[idx], reason[idx] = ok, None if ok else "REPROJECTION"
         none = ~ds & ~dt
         if none.any() and np.linalg.norm(t) > 1e-9:

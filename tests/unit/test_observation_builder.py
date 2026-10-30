@@ -123,9 +123,9 @@ def test_benchmark_and_gate_on_hand_built_session(
         "first_digest": rep["reproducibility"]["first_digest"],
     }
     assert rep["reference_available"] and "gap_1" in rep["pairs"] and rep["tracks"]["count"] > 0
-    decision = i1_decision([rep], [["R-STATIC"]], cfg)
-    assert decision["decision"] == "BLOCKED" and decision["failed_hard"] == ["r_hard_session"]
-    ok = i1_decision([rep], [["R-STATIC"], ["R-HARD"]], cfg)
-    assert "r_hard_session" not in ok["failed_hard"]
+    decision = i1_decision([rep], cfg)
+    assert decision["failed_hard"] == [] and decision["decision"] in ("PASS", "PASS-WITH-LIMITS")
+    assert any("object always in view" in s for s in decision["scope_limits"])
+    assert i1_decision([], cfg)["decision"] == "BLOCKED"
     run = write_run([rep], decision, cfg, tmp_path)
     assert (run / "observation_report.json").is_file() and run.name.split("_")[1] == "CW20175"

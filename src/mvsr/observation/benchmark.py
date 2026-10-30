@@ -50,6 +50,8 @@ AGE_BINS = (1, 5, 15, 30, 100)
 SURVIVAL_AT = (5, 15, 30, 100)
 STATIC_GT = "constant_T_base_obj"
 I1_SCOPE_LIMITS = (
+    "scope (owner 2026-10-30): object always in view, slow motion; occlusion, fast motion and "
+    "missing-depth scenes are not validated",
     "mask_prob not stored (binary mask + per-frame score only)",
     "reference transforms carry hand-eye/robot error (P1 board spread p95 ~4 mm)",
     "only ORB + KLT; learned extractors/matchers have no adapter yet",
@@ -400,17 +402,11 @@ def _check(name: str, ok: bool, value: Any, target: str, hard: bool) -> dict[str
     return {"name": name, "ok": bool(ok), "value": value, "target": target, "hard": hard}
 
 
-def i1_decision(
-    reports: list[dict[str, Any]], scenarios_available: list[list[str]], cfg: ObservationConfig
-) -> dict[str, Any]:
+def i1_decision(reports: list[dict[str, Any]], cfg: ObservationConfig) -> dict[str, Any]:
+    """R-HARD is out of scope (owner decision 2026-10-30): object always visible, slow motion."""
     g = cfg.gate
     checks: list[dict[str, Any]] = []
-    has_hard = any("R-HARD" in tags for tags in scenarios_available)
-    checks.append(
-        _check(
-            "r_hard_session", has_hard, has_hard, "an R-HARD session registered used_by I1", True
-        )
-    )
+    checks.append(_check("sessions", bool(reports), len(reports), ">= 1 session used_by I1", True))
     for r in reports:
         sid = r["session_id"]
         cov = r["frames"]["mask_coverage"]

@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from mvsr.calib.bundle import build_bundle
 from mvsr.calib.handeye import load_handeye
@@ -65,7 +66,7 @@ def test_plane_gives_coplanar_points_and_camera_facing_normals(
     raw = np.full((H, W), 4000, np.uint16)
     mask = np.zeros((H, W), bool)
     mask[10:50, 15:65] = True
-    g, _z = _geom(raw, mask, reference_handeye_path)
+    g, _z = _geom(raw, mask, reference_handeye_path, mask_erode_px=3)
     assert g.geometry_mask.sum() == (40 - 6) * (50 - 6)  # eroded by 3 px
     assert not (g.geometry_mask & ~mask).any()
     np.testing.assert_allclose(g.points_cam_m[:, 2], 0.4, atol=1e-6)
@@ -102,11 +103,14 @@ def test_steps_holes_range_and_noise_are_removed_not_filled(reference_handeye_pa
 
 def test_noise_threshold_and_sampling(reference_handeye_path: Path) -> None:
     rng = np.random.default_rng(3)
-    raw = (4000 + rng.normal(0, 60, (H, W))).astype(np.uint16)  # 6 mm std at 0.4 m >> sigma 2.9 mm
+    raw = (4000 + rng.normal(0, 60, (H, W))).astype(np.uint16)  # 6 mm std at 0.4 m >> sigma 3.6 mm
     mask = np.ones((H, W), bool)
     g, z = _geom(raw, mask, reference_handeye_path, mask_erode_px=0, edge_jump_rel=0.5, noise_k=1.0)
     assert g.geometry_mask.mean() < 0.5
-    assert abs(float(depth_sigma_m(0.4, load_observation_config().depth)) - 0.00292) < 1e-6
+    cfg = load_observation_config().depth
+    expected = cfg.sigma_a_m + cfg.sigma_b_per_m * 0.4**2
+    assert abs(float(depth_sigma_m(0.4, cfg)) - expected) < 1e-9
+    assert expected == pytest.approx(0.003584)
     d = sample_depth(z, g.geometry_mask, np.array([[10.2, 10.4], [-3.0, 2.0], [79.4, 59.4]]))
     assert d.dtype == np.float32 and np.isnan(d[1])
     assert np.isnan(d[0]) == (not g.geometry_mask[10, 10])

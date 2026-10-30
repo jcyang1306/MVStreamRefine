@@ -72,6 +72,7 @@ class CorrespondenceConfig:
     sigma_px: float
     ransac_iterations: int
     ransac_rigid_m: float
+    ransac_reproj_px: float
     ransac_epipolar_px: float
     min_model_matches: int
     seed: int
@@ -159,7 +160,7 @@ def _validate(cfg: ObservationConfig) -> None:
     c = cfg.correspondence
     if not 0 < c.ratio <= 1 or c.ransac_iterations < 1 or c.min_model_matches < 3:
         raise ConfigError("correspondence: ratio in (0, 1], ransac_iterations >= 1, min_model >= 3")
-    if c.ransac_rigid_m <= 0 or c.ransac_epipolar_px <= 0 or c.sigma_px <= 0:
+    if min(c.ransac_rigid_m, c.ransac_reproj_px, c.ransac_epipolar_px, c.sigma_px) <= 0:
         raise ConfigError("correspondence: thresholds and sigma_px must be > 0")
     b = cfg.benchmark
     if not b.frame_gaps or min(b.frame_gaps) < 1:

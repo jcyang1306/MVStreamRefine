@@ -1,0 +1,117 @@
+# Provisional, data-derived parameters (owner decision 2026-10-30): values fitted on the few
+# sessions recorded so far; recompute when new sessions of the listed scenarios are registered.
+# Rules and evidence: src/mvsr/tuning/derive.py, `mvsr derive-params`. Reminder: `mvsr params-status`,
+# `mvsr register-session` (stderr) and the test suite (tests/test_provisional_params.py) report
+# DUE entries; a value differing from its config file fails the tests.
+#
+# Entry: key (<sensors|observation>.<section>.<field>[.<sub>]), value, derived_on, basis
+# (session ids), rule, evidence (run dir), recheck_when {scenarios, min_new}.
+
+# --------------------------------------------------------------------- sensors (P1)
+- key: observation.depth.sigma_a_m
+  value: 0.0
+  derived_on: 2026-10-30
+  basis: [20261028T083612_CW20175_5bf8]
+  rule: "stereo model sigma = b z^2 (a fixed at 0); free fit gave a = 0.36 mm, b = 0.0200"
+  evidence: data/runs/20261030T090635_CW20175_d2f1
+  recheck_when: {scenarios: [R-CALIB], min_new: 1}
+- key: observation.depth.sigma_b_per_m
+  value: 0.0224
+  derived_on: 2026-10-30
+  basis: [20261028T083612_CW20175_5bf8]
+  rule: "least squares of board-plane noise (median|d|/0.6745) vs. board distance, 1020 frames, z 0.33-0.41 m; RMS residual 0.40 mm"
+  evidence: data/runs/20261030T090635_CW20175_d2f1
+  recheck_when: {scenarios: [R-CALIB], min_new: 1}
+- key: sensors.sync.max_interp_gap_ns
+  value: 31000000
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3, 20261028T083612_CW20175_5bf8]
+  rule: "ceil(p99.9) of successful robot sample intervals, >= 2 x median (8262 intervals: p50 10.8, p99.9 30.3, max 36.0 ms)"
+  evidence: data/runs/20261030T090635_CW20175_d2f1
+  recheck_when: {scenarios: [R-STATIC, R-CALIB, R-MARKER, R-BOTH], min_new: 1}
+- key: sensors.rgbd.max_color_depth_dt_ms.wrist
+  value: 3.1
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3, 20261028T083612_CW20175_5bf8]
+  rule: "min(frame interval / 4, max(1 ms, 10 x p99.9 in-sync |dt - median|)); in-sync p99.9 0.31 ms, 0 ambiguous"
+  evidence: data/runs/20261030T090635_CW20175_d2f1
+  recheck_when: {scenarios: [R-STATIC, R-CALIB, R-MARKER, R-BOTH], min_new: 1}
+- key: sensors.rgbd.max_color_depth_dt_ms.head
+  value: 1.0
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3, 20261028T083612_CW20175_5bf8]
+  rule: "same rule; in-sync deviation 0 ms -> 1 ms floor, 0 ambiguous"
+  evidence: data/runs/20261030T090635_CW20175_d2f1
+  recheck_when: {scenarios: [R-STATIC, R-CALIB, R-MARKER, R-BOTH], min_new: 1}
+
+# --------------------------------------------------------------------- observation (P2)
+- key: observation.depth.mask_erode_px
+  value: 7
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "max(1, ceil(-p5 silhouette offset)); p5 = -6.5 px on the cup take (I1 used 3 px)"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: observation.depth.edge_jump_rel
+  value: 0.014
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "p99.5 of relative 4-neighbour depth jumps on the mask interior (smooth cup surface)"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: observation.features.safe_erode_px
+  value: 7
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "raised to mask_erode_px so ORB keypoints have geometry-mask depth; 400-frame sweep preferred 4 px on drift"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: observation.features.fast_threshold
+  value: 7
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "I1 default; 400-frame sweep kept 7 (10/14 drop below 2 x I1 min tracked keypoints)"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: observation.tracks.fb_max_px
+  value: 1.0
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "I1 full-session default; 400-frame age<=30 sweep preferred 0.5. Recheck on a full take, do not switch from the subset"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: observation.tracks.max_descriptor_drift_bits
+  value: 64
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "P2 full-session age>100 drift 27.1 -> 14.0 px (500-frame subset 13.2 -> 6.7); 400-frame age<=30 sweep preferred 48"
+  evidence: data/runs/20261029T090933_CW20175_0df3
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: observation.correspondence.sigma_px
+  value: 1.15
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "1.4826 x median per-axis reprojection of robot-reference true matches (gap 5)"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER], min_new: 1}
+- key: observation.correspondence.ransac_rigid_m
+  value: 0.009
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "ceil(p95 3D residual of true matches, 8.5 mm); includes the ~4 mm robot-prior floor, recheck with R-MARKER"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER], min_new: 1}
+- key: observation.correspondence.ransac_reproj_px
+  value: 7.5
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "ceil(p95 one-sided reprojection of true matches, 7.43 px)"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER], min_new: 1}
+- key: observation.correspondence.ransac_epipolar_px
+  value: 2.3
+  derived_on: 2026-10-30
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "1.96 x sigma_px (Sampson of a true match ~ N(0, sigma_px))"
+  evidence: data/runs/20261030T091800_CW20175_7786
+  recheck_when: {scenarios: [R-STATIC, R-MARKER], min_new: 1}

@@ -8,13 +8,13 @@ Millimeter-level precision is a measured research goal, not guaranteed by 2-mm T
 
 ## Task sequence
 
-- [ ] **E1 — Fixtures.** Record and register the scenario set in `../INTEGRATION_PLAN.md` (R-CALIB, R-STATIC, R-MARKER, R-HANDHELD, R-BOTH, R-HARD × object set); keep a recording checklist per session.
+- [ ] **E1 — Fixtures.** Record and register the scenario set in `../INTEGRATION_PLAN.md` (R-CALIB, R-STATIC, R-MARKER, R-HANDHELD, R-BOTH × object set; R-HARD and reflective objects are out of scope, owner 2026-10-30); keep a recording checklist per session.
 
 - [ ] **E2 — Ground truth.** R-STATIC constant-pose metric, R-MARKER board poses with fixed `T_marker_obj` alignment, shape GT object (machined part / gauge block / calibrated sphere / external scan).
 
 - [ ] **E3 — Pose metrics.** Translation, rotation, RPE/ATE after valid fixed-gauge alignment, symmetry-aware DOFs, loss and recovery rate.
 
-- [ ] **E4 — Geometry metrics.** Held-out view residual median/RMSE/P95, coverage, surface thickness and GT shape difference; avoid training-data-only self evaluation.
+- [ ] **E4 — Geometry metrics.** Held-out view residual median/RMSE/P95, coverage of the reachable surface (ADR-0008), surface thickness and GT shape difference; avoid training-data-only self evaluation.
 
 - [ ] **E5 — Robustness.** Timing perturbation, depth noise, blur, mask errors, frames skipped, low texture and large rotation.
 

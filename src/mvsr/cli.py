@@ -13,6 +13,8 @@
     mvsr masks <session_id|path>
     mvsr observe-report <session_id ...> [--mask-revision R]       # P2 benchmark -> runs/
     mvsr i1-gate [<session_id ...>]                       # P2 gate (default: registry used_by I1)
+    mvsr derive-params [--stage sensors|observation|all]  # recompute provisional parameters
+    mvsr params-status                                    # DUE / MISMATCH vs configs/provisional_params.yaml
 
 Exit codes: 0 success, 1 check failed / session aborted, 2 usage or configuration error.
 """
@@ -25,6 +27,7 @@ import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from mvsr.software import version_string
 
@@ -150,6 +153,96 @@ def _add_p1(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         )
         p.add_argument("--json", action="store_true", help="print the full JSON report")
     _add_p2(sub)
+    _add_tuning(sub)
+
+
+def _add_tuning(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    p = sub.add_parser(
+        "derive-params", help="recompute provisional parameters from registered data"
+    )
+    p.add_argument("--stage", choices=["sensors", "observation", "all"], default="all")
+    p.add_argument("--calib", default=None, help="R-CALIB session (default: registry used_by I0)")
+    p.add_argument("--static", default=None, help="R-STATIC session (default: registry used_by I1)")
+    p.add_argument("--mask-revision", default=None, help="default: the only complete revision")
+    p.add_argument("--limit", type=int, default=400, help="frames per observation sweep run")
+    p.add_argument("--no-sweeps", action="store_true", help="skip the one-at-a-time sweeps")
+    p.add_argument("--data-root", type=Path, default=None, help="override $MVSR_DATA_ROOT")
+    sub.add_parser(
+        "params-status",
+        help="provisional parameters due for recompute (configs/provisional_params.yaml)",
+    )
+
+
+def _cmd_derive(args: argparse.Namespace) -> int:
+    import socket
+
+    from mvsr import paths
+    from mvsr.core.types import make_session_id
+    from mvsr.io.atomic import atomic_write_json
+    from mvsr.io.registry import load_registry
+    from mvsr.io.session_reader import load_manifest
+    from mvsr.observation.config import load_observation_config
+    from mvsr.paths import resolve_session_dir
+    from mvsr.sensors.config import load_sensors_config
+    from mvsr.tuning import derive
+
+    root = args.data_root and args.data_root.resolve()
+    reg = load_registry()
+    i0 = [e["session_id"] for e in reg if "I0" in e["used_by"]]
+    calib = args.calib or next(
+        (e["session_id"] for e in reg if "I0" in e["used_by"] and "R-CALIB" in e["scenario"]), None
+    )
+    static = args.static or next(
+        (e["session_id"] for e in reg if "I1" in e["used_by"] and "R-STATIC" in e["scenario"]), None
+    )
+    scfg, ocfg = load_sensors_config(), load_observation_config()
+    out: dict[str, Any] = {"basis": {"i0_sessions": i0, "calib": calib, "static": static}}
+    if args.stage in ("sensors", "all"):
+        dirs = [resolve_session_dir(s, root) for s in i0]
+        out["sensors"] = {
+            "depth_sigma": None
+            if calib is None
+            else derive.depth_sigma(resolve_session_dir(calib, root), scfg),
+            "max_interp_gap": derive.max_interp_gap(dirs),
+            "rgbd_limits": derive.rgbd_limits(dirs, scfg),
+        }
+    if args.stage in ("observation", "all") and static is not None:
+        path = resolve_session_dir(static, root)
+        rev = _pick_revision(path, args.mask_revision)
+        out["observation"] = {
+            "mask_revision": rev,
+            "statistics": derive.observation_statistics(path, rev, ocfg),
+        }
+        if not args.no_sweeps:
+            sweeps = {k: derive.sweep(path, rev, ocfg, k, limit=args.limit) for k in derive.SWEEPS}
+            se, me = sweeps["features.safe_erode_px"], out["observation"]["statistics"]
+            if se["value"] is not None and me["mask_erode_px"] is not None:
+                se["value"] = max(se["value"], me["mask_erode_px"])
+            out["observation"]["sweeps"] = sweeps
+    first = calib or static
+    host = load_manifest(resolve_session_dir(first, root)).get("host") if first else None
+    d = (root or paths.data_root()) / "runs" / make_session_id(str(host or socket.gethostname()))
+    d.mkdir(parents=True)
+    atomic_write_json(
+        d / "derived_params.json", {"schema_version": 1, "type": "DerivedParams", **out}
+    )
+    print(json.dumps(out, indent=2, sort_keys=True, default=str))
+    print(f"written to {d}", file=sys.stderr)
+    return 0
+
+
+def _cmd_params_status(args: argparse.Namespace) -> int:
+    from mvsr.tuning.registry import reminder_lines, status
+
+    rows = status()
+    for r in rows:
+        flag = "DUE " if r["due"] else ("MISMATCH" if r["config_mismatch"] else "ok  ")
+        print(
+            f"{flag} {r['key']} = {r['value']} (config {r['config_value']}) new sessions: {r['new_sessions']}"
+        )
+    for line in reminder_lines(rows):
+        print(line)
+    return 1 if any(r["config_mismatch"] for r in rows) else 0
 
 
 def _add_p2(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -279,13 +372,10 @@ def _cmd_observe(args: argparse.Namespace) -> int:
     root = args.data_root and args.data_root.resolve()
     cfg = load_observation_config(args.config)
     sessions = list(args.sessions)
-    scen: list[list[str]] = []
     if args.command == "i1-gate" and not sessions:
         from mvsr.io.registry import load_registry
 
-        entries = [e for e in load_registry() if "I1" in e["used_by"]]
-        sessions = [e["session_id"] for e in entries]
-        scen = [list(e["scenario"]) for e in entries]
+        sessions = [e["session_id"] for e in load_registry() if "I1" in e["used_by"]]
         if not sessions:
             print("I1 decision: BLOCKED (no registry sessions used_by I1)", file=sys.stderr)
             return 1
@@ -294,9 +384,7 @@ def _cmd_observe(args: argparse.Namespace) -> int:
         path = resolve_session_dir(s, root)
         rep = run_benchmark(path, _pick_revision(path, args.mask_revision), cfg, limit=args.limit)
         reports.append(rep)
-        if not scen or len(scen) < len(reports):
-            scen.append(list((rep["scenario"] or {}).get("tags") or []))
-    decision = i1_decision(reports, scen, cfg) if args.command == "i1-gate" else None
+    decision = i1_decision(reports, cfg) if args.command == "i1-gate" else None
     run_dir = write_run(reports, decision, cfg, root)
     if args.json:
         print(
@@ -361,6 +449,10 @@ def _cmd_register(args: argparse.Namespace) -> int:
         path, used_by=[u for u in args.used_by.split(",") if u], gt=args.gt, registry=args.registry
     )
     print(json.dumps(entry, indent=2, sort_keys=True))
+    from mvsr.tuning.registry import reminder_lines, status
+
+    for line in reminder_lines(status()):
+        print(line, file=sys.stderr)
     return 0
 
 
@@ -488,6 +580,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "masks": _cmd_masks,
         "observe-report": _cmd_observe,
         "i1-gate": _cmd_observe,
+        "derive-params": _cmd_derive,
+        "params-status": _cmd_params_status,
     }
     from mvsr.core.errors import MvsrError
 

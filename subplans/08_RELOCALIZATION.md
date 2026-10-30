@@ -16,7 +16,7 @@ When target is fully invisible and free-moving, prediction is not a ground-truth
 
 - [ ] **R4 — Resume protocol.** Transition LOST->RELOCALIZING->TRACKING only on verified pose; reuse map, never restart object frame.
 
-- [ ] **R5 — Tests.** Occlusion, out-of-FOV reentry, rotation >90deg, symmetric object and poor mask.
+- [ ] **R5 — Tests.** Poor mask and short tracking dropouts within the reachable arc. Occlusion, out-of-FOV re-entry and rotation >90° are outside the current scope (owner 2026-10-30; ADR-0008: retrieval only within the seen arc).
 
 ## Interfaces and delivery
 - Define/export the public inputs/outputs in the shared contracts; do not re-define `T_cam_obj`, depth scale, timestamp or keyframe IDs locally.

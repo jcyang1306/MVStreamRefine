@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from mvsr.calib.bundle import with_handeye
-from mvsr.calib.handeye import HandEye
+from mvsr.calib.handeye import HandEye, load_handeye
 from mvsr.core.errors import SessionFormatError
 from mvsr.core.types import FrameStatus, SensorFrame, SessionStatus
 from mvsr.io.session_reader import SessionReader
@@ -46,7 +46,10 @@ class ReplaySource:
         verify_images: bool = True,
         allow_incomplete: bool = False,
         handeye: HandEye | None = None,
+        use_session_handeye: bool = False,
     ) -> None:
+        """`handeye` overrides; otherwise `replay.handeye` from the config, unless it is null or
+        `use_session_handeye` is set, in which case the copy recorded in the session is used."""
         if speed is not None and speed <= 0:
             raise ValueError("speed must be > 0 or None")
         self.config = config or load_sensors_config()
@@ -58,6 +61,14 @@ class ReplaySource:
             raise SessionFormatError(f"session has no camera {camera_id!r}")
         self.camera_id = camera_id
         self.session_id = self.reader.session_id
+        self.handeye_source = "argument"
+        if handeye is None and not use_session_handeye:
+            path = self.config.replay.handeye_path()
+            if path is not None:
+                handeye = load_handeye(path, self.config.replay.handeye_sha256)
+                self.handeye_source = "config"
+        if handeye is None:
+            self.handeye_source = "session_copy"
         self.handeye = handeye
         self.bundle = self.reader.calibration(camera_id)
         if handeye is not None:

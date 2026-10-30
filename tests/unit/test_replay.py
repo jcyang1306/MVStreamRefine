@@ -33,7 +33,7 @@ R0, M0 = 1_793_000_000_000_000_000, 2_000_000_000_000_000
 T_FRAME0 = M0 + 1_000_000_000
 H, W = 12, 16
 DROPPED = (3,)
-FAILED_ROBOT_MS = (110, 120, 130)  # bracket 100..140 ms > 25 ms gap limit
+FAILED_ROBOT_MS = (110, 120, 130)  # bracket 100..140 ms > sync.max_interp_gap_ns
 ROBOT_MS = range(-50, 251, 10)
 
 

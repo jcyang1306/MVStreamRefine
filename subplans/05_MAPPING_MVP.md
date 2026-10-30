@@ -14,7 +14,7 @@ MVP may rebuild whole TSDF after keyframe changes; do not implement advanced wei
 
 - [ ] **M3 — Conservative commit.** Only validated and version-consistent keyframes update map; provisional vs committed frames.
 
-- [ ] **M4 — Geometry output.** Object point cloud, mesh, per-frame fused count, debugging overlays, model export transform.
+- [ ] **M4 — Geometry output.** Object point cloud, mesh, per-frame fused count, debugging overlays, model export transform. The model is partial (reachable viewpoints only, ADR-0008); report coverage of the observed surface, never imply a closed model.
 
 - [ ] **M5 — Baseline tests.** R-STATIC model matches the V1 base-frame model up to the known gauge translation; R-BOTH merges object surfaces without smearing; wrong-extrinsic (inverted) regression test on a real session.
 

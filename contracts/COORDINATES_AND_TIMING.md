@@ -24,7 +24,7 @@ Defined by ADR-0005: origin at the median of valid object points of the first ac
 ## Time
 - Canonical domain `HOST_MONOTONIC` (ns). `timestamp_ns` = estimated mid-exposure (ADR-0004).
 - All raw clock values (host arrival, RealSense global/sensor/frame timestamps, exposure, robot sample host time) are persisted; mapping between domains is a replay-time function with reported residuals.
-- Robot pose at frame time: rotation slerp + translation lerp between bracketing samples; valid only if gap ≤ `robot.max_interp_gap_ns`; never extrapolate. Residual offset `dt_robot_cam_ns` comes from `CalibrationBundle`.
+- Robot pose at frame time: rotation slerp + translation lerp between bracketing samples; valid only if gap ≤ `sync.max_interp_gap_ns` (`configs/sensors.yaml`); never extrapolate. Residual offset `dt_robot_cam_ns` comes from `CalibrationBundle`.
 
 ## Perturbation and interpolation conventions
 - se(3) vector order `[ρ (translation), φ (rotation)]` = `[tx,ty,tz,rx,ry,rz]`; `Exp`/`Log` are the exact SE(3) maps (with the V matrix), not decoupled.

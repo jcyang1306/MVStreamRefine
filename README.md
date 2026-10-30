@@ -54,6 +54,15 @@ docker compose run --rm dev mvsr i1-gate                                      # 
 ```
 Settings and placeholders: `configs/observation.yaml`; evidence and limits: `subplans/02_OBSERVATION.md`.
 
+## Provisional parameters (data-derived, recompute with new data)
+```bash
+docker compose run --rm dev mvsr derive-params --stage all       # rules: src/mvsr/tuning/derive.py -> data/runs/
+docker compose run --rm dev mvsr params-status                   # DUE = new registered sessions not in the basis
+```
+`configs/provisional_params.yaml` lists every value fitted on the current sessions (basis, rule,
+evidence run, `recheck_when`). `mvsr register-session` and the test suite print a RECHECK reminder
+when an entry is due; a registry value differing from its config file fails the tests.
+
 Recorder settings, units and placeholders: `configs/record.yaml`. The hand-eye reference is
 `configs/handeye/handeye_tf_20261028.txt` (from `calibration_result.json`, sha256 pinned, ADR-0007). The 2026-10-12 file remains for sessions that already copied it.
 
@@ -71,4 +80,4 @@ Recorder settings, units and placeholders: `configs/record.yaml`. The hand-eye r
 ## Key references
 - V1 reference implementation (read-only): `ref/MVStreamRefine`.
 - Contracts: `contracts/DATA_CONTRACTS.md`, `contracts/COORDINATES_AND_TIMING.md`, `contracts/SESSION_FORMAT.md`.
-- Decisions: `decisions/ADR-0001` (architecture) … `ADR-0007` (new recordings only, recorder in P0, head camera).
+- Decisions: `decisions/ADR-0001` (architecture) … `ADR-0007` (new recordings only, recorder in P0, head camera), `ADR-0008` (limited viewpoints, no loop closure, keyframe-anchored tracking).

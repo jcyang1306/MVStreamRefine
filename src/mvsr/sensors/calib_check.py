@@ -332,9 +332,9 @@ def check_board_session(
     report: dict[str, Any] = {
         "board": {"inner_cols": spec.inner_cols, "inner_rows": spec.inner_rows, "square_mm": sq},
         "handeye": {
-            "source": "override" if handeye is not None else "session_copy",
-            "sha256": None if handeye is None else handeye.sha256,
-            "path": None if handeye is None else handeye.source_path,
+            "source": wrist.handeye_source,
+            "sha256": None if wrist.handeye is None else wrist.handeye.sha256,
+            "path": None if wrist.handeye is None else wrist.handeye.source_path,
         },
         "cameras": {},
     }

@@ -11,15 +11,21 @@ clock:
                                         # 2026-10-28 (27.2-28.0 ms); method string declares it
 
 sync:
-  max_interp_gap_ns: 25000000           # ADR-0004 placeholder 25 ms; robot poll interval measured p95 17.4 ms,
-                                        # max 36 ms (2026-10-28) -> ~0.4 % of brackets exceed it (GAP_TOO_LARGE)
+  max_interp_gap_ns: 31000000           # PROVISIONAL: ceil(p99.9) of 8262 robot intervals (p50 10.8, p99 21.0,
+                                        # p99.9 30.3, max 36.0 ms); 4 intervals exceed it (configs/provisional_params.yaml)
+
+replay:
+  # Owner decision 2026-10-30: evaluate every session with the newest hand-eye calibration, not the
+  # copy stored at record time (raw session files stay untouched). null -> use the session copy.
+  handeye: configs/handeye/handeye_tf_20261028.txt
+  handeye_sha256: 2b60289b9b68c62b08d40eddc0a06232249c152d12ec1687639e6c2d974d0ef3
 
 rgbd:
   # Colour/depth from different exposures (repeated colour frame or depth a frame interval off) is
   # not registered RGB-D: such frames are not emitted, and are counted by reason (src/mvsr/sensors/rgbd.py).
   max_color_depth_dt_ms:                # |dt - stream median| limit; null disables the check per camera
-    wrist: 5.0                          # in-sync D405 offset -0.23 ms; mismatches are >= 33 ms (2026-10-28)
-    head: 10.0                          # D435 in-sync -32.4 ms (colour has no mid-exposure stamp); mismatches 66.7 ms steps
+    wrist: 3.1                          # PROVISIONAL: min(interval/4, max(1 ms, 10 x p99.9 in-sync deviation 0.31 ms)); 0 ambiguous
+    head: 1.0                           # PROVISIONAL: in-sync deviation 0 ms -> 1 ms floor; mismatches 66.7 ms steps; 0 ambiguous
   skip_mismatched: true                 # false: emit them anyway with source_meta.rgbd set
 
 live:

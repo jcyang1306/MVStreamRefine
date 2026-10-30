@@ -23,6 +23,12 @@ def test_record_cli_defaults_are_one_p0_take() -> None:
     assert build_parser().parse_args(["record", "--object", "cup", "--no-preview"]).preview is False
 
 
+def test_tuning_cli_parses_and_params_status_agrees() -> None:
+    assert build_parser().parse_args(["params-status"]).command == "params-status"
+    assert build_parser().parse_args(["derive-params", "--stage", "sensors"]).stage == "sensors"
+    assert main(["params-status"]) == 0
+
+
 def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--version"])

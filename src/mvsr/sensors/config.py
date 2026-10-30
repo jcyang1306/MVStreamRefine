@@ -29,6 +29,18 @@ class SyncConfig:
 
 
 @dataclass(frozen=True)
+class ReplayConfig:
+    handeye: str | None
+    handeye_sha256: str | None
+
+    def handeye_path(self) -> Path | None:
+        if self.handeye is None:
+            return None
+        p = Path(self.handeye)
+        return p if p.is_absolute() else repo_root() / p
+
+
+@dataclass(frozen=True)
 class RgbdConfig:
     max_color_depth_dt_ms: dict[str, float | None]
     skip_mismatched: bool
@@ -80,6 +92,7 @@ class GateConfig:
 class SensorsConfig:
     clock: ClockConfig
     sync: SyncConfig
+    replay: ReplayConfig
     rgbd: RgbdConfig
     live: LiveConfig
     board: BoardConfig
@@ -101,6 +114,7 @@ def load_sensors_config(path: str | Path | None = None) -> SensorsConfig:
     cfg = SensorsConfig(
         clock=load_section(raw, ClockConfig, "clock"),
         sync=load_section(raw, SyncConfig, "sync"),
+        replay=load_section(raw, ReplayConfig, "replay"),
         rgbd=load_section(raw, RgbdConfig, "rgbd"),
         live=load_section(raw, LiveConfig, "live"),
         board=load_section(raw, BoardConfig, "board"),
@@ -121,6 +135,9 @@ def _validate(cfg: SensorsConfig) -> None:
         raise ConfigError("clock.fallback_latency_ns must be >= 0")
     if cfg.sync.max_interp_gap_ns <= 0:
         raise ConfigError("sync.max_interp_gap_ns must be > 0")
+    r = cfg.replay
+    if (r.handeye is None) != (r.handeye_sha256 is None):
+        raise ConfigError("replay.handeye and replay.handeye_sha256 must both be set or both null")
     for cid, lim in cfg.rgbd.max_color_depth_dt_ms.items():
         if cid not in ("wrist", "head") or (lim is not None and lim <= 0):
             raise ConfigError(

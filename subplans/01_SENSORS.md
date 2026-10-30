@@ -16,11 +16,13 @@ Device adapters and the recorder were moved to P0 (ADR-0007). P1 turns recorded 
 
 - [x] **S3 — Recording protocol.** Checklist below; one R-CALIB take (`20261028T083612_CW20175_5bf8`) plus the P0 R-STATIC take (`20261028T080558_CW20175_9fb3`) registered `used_by: I0`.
 
-- [x] **S4 — Clock synchronization.** `sensors/clock.py`: mid-exposure from RealSense global time (primary, ADR-0004 §3 amended), exact lower-envelope fit as cross-check/fallback with residuals, uint32 µs counter unwrap; `sensors/sync.py`: bracketing slerp+lerp with the 25 ms gap limit, no extrapolation, `PoseSyncInfo` per frame. `dt_robot_cam` not estimated (applied value 0 from the bundle).
+- [x] **S4 — Clock synchronization.** `sensors/clock.py`: mid-exposure from RealSense global time (primary, ADR-0004 §3 amended), exact lower-envelope fit as cross-check/fallback with residuals, uint32 µs counter unwrap; `sensors/sync.py`: bracketing slerp+lerp with `sync.max_interp_gap_ns` (31 ms, ceil of measured p99.9; `configs/provisional_params.yaml`), no extrapolation, `PoseSyncInfo` per frame. `dt_robot_cam` not estimated (applied value 0 from the bundle).
 
 - [x] **S5 — Replay.** `ReplaySource` (`sensors/replay.py`, port `SensorSource.next() -> SensorFrame | EndOfStream`): checksum-verified, deterministic (`mvsr replay` prints an output sha256; identical across runs), `speed=None|s`, random-access `read(frame_id)`.
 
 - [x] **S6 — Validation sessions.** `mvsr i0-gate` on the two registered takes; evidence below.
+
+**Re-run 2026-10-30 with the newest hand-eye** (owner decision: only the 2026-10-28 sessions and the newest calibration; `configs/sensors.yaml: replay.handeye` now applies it to every replay, raw session copies untouched): I0 **PASS**, run `data/runs/20261030T081218_CW20175_f56c`. Wrist board-in-base spread median / p95 1.68 / 3.83 mm, 0.38 / 0.79°; hand-eye reprojection median / p95 2.39 / 6.05 px; head vs wrist reference 2.51 mm / 0.60°. The table below is the 2026-10-28 run with the session copy (2026-10-12 hand-eye).
 
 ### Found during P1 (not in the original plan)
 - **Colour/depth from different exposures** (ADR-0004 §8): 14–15 % of wrist framesets (repeated colour frame #N with new depth, or depth one interval off) and the same on the head. Sources do not emit them and count them per reason. Owner decision 2026-10-28: keep this behaviour; a wrist-only comparison recording is deferred.

@@ -6,11 +6,13 @@
 ## Purpose and boundary
 Robotic camera prior alone does not create additional constraints on independent object motion; do not claim automatic gain.
 
+BA removes residual inconsistency among keyframes and landmarks **inside the reachable arc**. It is not a substitute for P3 keyframe-anchored tracking: without T3/K3, associations would already be a drifting chain and BA would have nothing consistent to refine. No loop-closure edges (ADR-0008); the robot prior is an absolute camera anchor only while the object is static in `base`.
+
 ## Task sequence
 
 - [ ] **B1 — Factor API.** SE3 manifolds, residual direction, robust losses and covariance; Ceres backend optional Python reference.
 
-- [ ] **B2 — Visual factors.** 2D reprojection and depth factors from long-lived landmark tracks; deduplicate correlated measurements.
+- [ ] **B2 — Visual factors.** 2D reprojection and depth factors from landmarks built by keyframe descriptor matches (P2 O5 `orb`); KLT tracks only as short-baseline links (ADR-0008); deduplicate correlated measurements.
 
 - [ ] **B3 — Geometric factors.** Surface point-to-plane / model residual and robust correspondence filtering.
 
@@ -20,7 +22,7 @@ Robotic camera prior alone does not create additional constraints on independent
 
 - [ ] **B6 — Robot/camera optional.** V2 jointly refine X_i with measured robot covariance; require independent static background constraints when useful.
 
-- [ ] **B7 — Global graph.** Keyframe-relative SE3 edges, loop closures, outlier switch/robust checks, marginalization strategy.
+- [ ] **B7 — Global graph.** Keyframe-relative SE3 covisibility edges; **no loop closures** (the reachable viewpoints do not close a loop, ADR-0008); revisits within the arc enter as ordinary covisibility edges; outlier switch/robust checks, marginalization strategy; gauge fixed at the first keyframe; robot prior as absolute camera anchor only while the object is static in `base`.
 
 - [ ] **B8 — Benchmark.** Jacobian numeric check (analytic unit test), R-MARKER GT and R-STATIC spread, held-out surface validation; compare frame-only vs window vs robot-aided.
 

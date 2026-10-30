@@ -14,11 +14,14 @@ sam2:
 depth:
   min_depth_m: 0.07                     # D405 optimal range 7-50 cm (MASTER_PLAN.md)
   max_depth_m: 0.60                     # beyond: outside the object workspace for this rig
-  mask_erode_px: 3                      # mask boundary pixels mix object and background depth
-  edge_jump_rel: 0.02                   # |z - z_4neighbour| > rel * z -> depth discontinuity / flying pixel (removed)
+  mask_erode_px: 7                      # PROVISIONAL: ceil(-p5 silhouette offset -6.5 px): depth steps up to 6.5 px
+                                        # inside the colour mask (background depth inside the mask) are cut
+  edge_jump_rel: 0.014                  # PROVISIONAL: p99.5 of interior relative 4-neighbour jumps (smooth surface);
+                                        # |z - z_4neighbour| > rel * z -> depth discontinuity / flying pixel (removed)
   noise_k: 3.0                          # 3x3 local std > k * sigma(z) -> noisy (removed)
-  sigma_a_m: 0.0010                     # PLACEHOLDER depth noise sigma(z) = a + b z^2; at 0.37 m = 2.6 mm,
-  sigma_b_per_m: 0.0120                 # matching the P1 board plane-distance median 2.2 mm at 0.33-0.41 m
+  sigma_a_m: 0.0                        # PROVISIONAL depth noise sigma(z) = a + b z^2 (stereo: a = 0), fitted on
+  sigma_b_per_m: 0.0224                 # 1020 R-CALIB board frames: 3.3 mm at 0.38 m, valid 0.33-0.41 m
+                                        # (configs/provisional_params.yaml)
   point_stride: 1                       # every Nth geometry pixel (row-major) becomes a 3D point
 
 features:
@@ -29,7 +32,7 @@ features:
   n_levels: 8
   edge_threshold: 19                    # ORB border (px); >= patch_size / 2 + 3
   patch_size: 31
-  safe_erode_px: 6                      # keypoints only this far inside the mask (no background corners)
+  safe_erode_px: 7                      # PROVISIONAL: raised to mask_erode_px so keypoints sit inside the geometry mask
 
 tracks:
   klt_window_px: 21
@@ -45,10 +48,11 @@ tracks:
 correspondence:
   ratio: 0.8                            # Lowe ratio for ORB descriptor matching (+ mutual check)
   max_hamming: 64
-  sigma_px: 1.0                         # PLACEHOLDER isotropic keypoint std-dev (px)
+  sigma_px: 1.15                        # PROVISIONAL: 1.4826 x median per-axis reprojection of true matches (px)
   ransac_iterations: 500
-  ransac_rigid_m: 0.006                 # PLACEHOLDER 3D residual for the screening model (~2 sigma at 0.4 m)
-  ransac_epipolar_px: 2.0               # Sampson distance for matches without depth on both sides
+  ransac_rigid_m: 0.009                 # PROVISIONAL: ceil(p95 3D residual of true matches); includes ~4 mm robot-prior floor
+  ransac_reproj_px: 7.5                 # PROVISIONAL: ceil(p95 one-sided reprojection of true matches)
+  ransac_epipolar_px: 2.3               # PROVISIONAL: 1.96 x sigma_px (Sampson of a true match ~ N(0, sigma_px))
   min_model_matches: 6                  # fewer 3D-3D matches -> no rigid model, essential-matrix screening
   seed: 0
 
