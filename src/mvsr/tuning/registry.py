@@ -19,7 +19,11 @@ from mvsr.io.registry import load_registry
 from mvsr.paths import repo_root
 
 REGISTRY = "configs/provisional_params.yaml"
-CONFIG_FILES = {"sensors": "configs/sensors.yaml", "observation": "configs/observation.yaml"}
+CONFIG_FILES = {
+    "sensors": "configs/sensors.yaml",
+    "observation": "configs/observation.yaml",
+    "tracking": "configs/tracking.yaml",
+}
 
 
 def load_params(path: str | Path | None = None) -> list[dict[str, Any]]:

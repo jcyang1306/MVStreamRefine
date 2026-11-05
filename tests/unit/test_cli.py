@@ -29,6 +29,13 @@ def test_tuning_cli_parses_and_params_status_agrees() -> None:
     assert main(["params-status"]) == 0
 
 
+def test_tracking_cli_parses() -> None:
+    report = build_parser().parse_args(["tracking-report", "session", "--limit", "10"])
+    assert report.command == "tracking-report" and report.limit == 10
+    gate = build_parser().parse_args(["i2-gate"])
+    assert gate.command == "i2-gate" and gate.sessions == []
+
+
 def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--version"])

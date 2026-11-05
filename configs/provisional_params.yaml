@@ -115,3 +115,40 @@
   rule: "1.96 x sigma_px (Sampson of a true match ~ N(0, sigma_px))"
   evidence: data/runs/20261030T091800_CW20175_7786
   recheck_when: {scenarios: [R-STATIC, R-MARKER], min_new: 1}
+
+# --------------------------------------------------------------------- tracking (P3)
+- key: tracking.icp.max_refinement_m
+  value: 0.001
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "conservative cap after the low-texture cup showed unconstrained point-to-plane ICP worsening 100-frame R-STATIC p95 from 14 mm to 48 mm"
+  evidence: data/runs/20261105T044934_CW20175_98b0
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: tracking.icp.max_refinement_deg
+  value: 0.5
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "paired with the 1 mm ICP correction cap; larger refinements fall back to the keyframe feature hypothesis"
+  evidence: data/runs/20261105T044934_CW20175_98b0
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: tracking.validity.max_correction_m
+  value: 0.03
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "slow-motion provisional bound; larger correction from the motion prediction is DEGRADED and cannot create a keyframe"
+  evidence: data/runs/20261105T044934_CW20175_98b0
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: tracking.validity.max_correction_deg
+  value: 10.0
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "slow-motion provisional angular bound paired with max_correction_m"
+  evidence: data/runs/20261105T044934_CW20175_98b0
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: tracking.keyframes.max_frame_gap
+  value: 30
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "at most about one second between candidate anchors at 30 fps; P4 replaces the temporary bounded-window policy"
+  evidence: data/runs/20261105T044934_CW20175_98b0
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}

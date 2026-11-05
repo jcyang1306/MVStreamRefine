@@ -1,0 +1,48 @@
+# P3 tracking configuration (subplans/03_TRACKING.md). Values are provisional until I2 has
+# R-MARKER/R-BOTH evidence; R-STATIC thresholds are intentionally above the P1 reference floor.
+
+initialization:
+  min_geometry_points: 200
+  min_keypoints_with_depth: 6
+
+hypothesis:
+  min_inliers: 6
+  max_local_keyframes: 6
+  max_icp_hypotheses: 3
+  use_recent_tracks: true
+
+icp:
+  enabled: true
+  max_points: 1000
+  iterations: [3, 2, 1]
+  max_correspondence_m: [0.020, 0.012, 0.007]
+  huber_delta_m: 0.006
+  min_correspondences: 50
+  normal_angle_deg: 60.0
+  max_refinement_m: 0.001
+  max_refinement_deg: 0.5
+
+validity:
+  min_overlap: 0.15
+  max_rmse_m: 0.012
+  min_hessian_eig: 1.0e-7
+  max_correction_m: 0.030
+  max_correction_deg: 10.0
+  prediction_only_frames: 3
+  lost_after_frames: 8
+
+keyframes:
+  max_keyframes: 12
+  max_frame_gap: 30
+  min_anchor_overlap: 0.55
+  max_anchor_translation_m: 0.040
+  max_anchor_rotation_deg: 12.0
+
+benchmark:
+  reproducibility_frames: 60
+
+gate:
+  min_valid_ratio: 0.90
+  max_static_translation_p95_mm: 15.0
+  max_static_rotation_p95_deg: 3.0
+  max_failure_ratio: 0.10

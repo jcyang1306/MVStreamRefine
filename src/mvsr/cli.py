@@ -13,6 +13,8 @@
     mvsr masks <session_id|path>
     mvsr observe-report <session_id ...> [--mask-revision R]       # P2 benchmark -> runs/
     mvsr i1-gate [<session_id ...>]                       # P2 gate (default: registry used_by I1)
+    mvsr tracking-report <session_id ...> [--mask-revision R]     # P3 benchmark -> runs/
+    mvsr i2-gate [<session_id ...>]                       # P3 gate (default: registry used_by I2)
     mvsr derive-params [--stage sensors|observation|all]  # recompute provisional parameters
     mvsr params-status                                    # DUE / MISMATCH vs configs/provisional_params.yaml
 
@@ -290,6 +292,24 @@ def _add_p2(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         p.add_argument("--limit", type=int, default=None, help="observe only N frames")
         p.add_argument("--config", type=Path, default=None, help="observation YAML")
         p.add_argument("--json", action="store_true", help="print the full JSON report")
+    _add_p3(sub)
+
+
+def _add_p3(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    for name, helptext in (
+        ("tracking-report", "keyframe-anchored tracking benchmark (P3 T7) -> data/runs/"),
+        ("i2-gate", "I2 gate: tracking benchmark + decision (default: registry used_by I2)"),
+    ):
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument(
+            "sessions", nargs="*" if name == "i2-gate" else "+", help="session ids or dirs"
+        )
+        p.add_argument("--data-root", type=Path, default=None, help="override $MVSR_DATA_ROOT")
+        p.add_argument("--mask-revision", default=None, help="default: the only complete revision")
+        p.add_argument("--limit", type=int, default=None, help="track only N frames")
+        p.add_argument("--tracking-config", type=Path, default=None, help="tracking YAML")
+        p.add_argument("--observation-config", type=Path, default=None, help="observation YAML")
+        p.add_argument("--json", action="store_true", help="print the full JSON report")
 
 
 def _cmd_segment(args: argparse.Namespace) -> int:
@@ -399,6 +419,54 @@ def _cmd_observe(args: argparse.Namespace) -> int:
 
         print(format_report(reports, decision, run_dir))
     if args.command == "i1-gate":
+        return 1 if decision is None or decision["decision"] == "BLOCKED" else 0
+    return 0
+
+
+def _cmd_track(args: argparse.Namespace) -> int:
+    from mvsr.observation.config import load_observation_config
+    from mvsr.paths import resolve_session_dir
+    from mvsr.tracking.benchmark import i2_decision, run_benchmark, write_run
+    from mvsr.tracking.config import load_tracking_config
+
+    root = args.data_root and args.data_root.resolve()
+    tcfg = load_tracking_config(args.tracking_config)
+    ocfg = load_observation_config(args.observation_config)
+    sessions = list(args.sessions)
+    if args.command == "i2-gate" and not sessions:
+        from mvsr.io.registry import load_registry
+
+        sessions = [e["session_id"] for e in load_registry() if "I2" in e["used_by"]]
+        if not sessions:
+            print("I2 decision: BLOCKED (no registry sessions used_by I2)", file=sys.stderr)
+            return 1
+    reports = []
+    for session in sessions:
+        path = resolve_session_dir(session, root)
+        reports.append(
+            run_benchmark(
+                path,
+                _pick_revision(path, args.mask_revision),
+                tcfg,
+                ocfg,
+                limit=args.limit,
+            )
+        )
+    decision = i2_decision(reports, tcfg) if args.command == "i2-gate" else None
+    run_dir = write_run(reports, decision, tcfg, ocfg, root)
+    if args.json:
+        print(
+            json.dumps(
+                {"sessions": reports, "i2": decision, "run_dir": str(run_dir)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        from mvsr.tracking.report import format_report
+
+        print(format_report(reports, decision, run_dir))
+    if args.command == "i2-gate":
         return 1 if decision is None or decision["decision"] == "BLOCKED" else 0
     return 0
 
@@ -580,6 +648,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "masks": _cmd_masks,
         "observe-report": _cmd_observe,
         "i1-gate": _cmd_observe,
+        "tracking-report": _cmd_track,
+        "i2-gate": _cmd_track,
         "derive-params": _cmd_derive,
         "params-status": _cmd_params_status,
     }

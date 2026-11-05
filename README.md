@@ -54,6 +54,15 @@ docker compose run --rm dev mvsr i1-gate                                      # 
 ```
 Settings and placeholders: `configs/observation.yaml`; evidence and limits: `subplans/02_OBSERVATION.md`.
 
+## P3 usage (keyframe-anchored 6D tracking)
+```bash
+docker compose run --rm dev mvsr tracking-report <session_id> [--limit N]
+docker compose run --rm dev mvsr i2-gate      # registry sessions used_by I2
+```
+P3 uses a bounded in-memory anchor window until P4 supplies durable keyframe memory. It does
+not chain poses frame-to-frame and does not perform BA or loop closure (ADR-0008). Settings:
+`configs/tracking.yaml`; evidence and limits: `subplans/03_TRACKING.md`.
+
 ## Provisional parameters (data-derived, recompute with new data)
 ```bash
 docker compose run --rm dev mvsr derive-params --stage all       # rules: src/mvsr/tuning/derive.py -> data/runs/
