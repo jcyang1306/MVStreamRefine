@@ -72,6 +72,15 @@ P4 replaces P3's temporary recent-anchor window with viewpoint/covisibility/appe
 selection, bounded local retrieval and a checksummed restartable memory. The P4 stage gate
 does not claim I3: I3 additionally requires P5 mapping. Settings: `configs/keyframes.yaml`.
 
+## P5 usage (object-frame TSDF)
+```bash
+docker compose run --rm dev mvsr mapping-report <session_id> [--keyframe-memory PATH]
+docker compose run --rm dev mvsr i3-gate      # registry sessions used_by I3
+```
+P5 fuses masked depth with Open3D using `extrinsic=T_cam_obj`. While tracking p95 exceeds
+the mapping gate, the command writes a provisional diagnostic model and does not publish a
+committed `MapSnapshot`. Settings: `configs/mapping.yaml`.
+
 ## Provisional parameters (data-derived, recompute with new data)
 ```bash
 docker compose run --rm dev mvsr derive-params --stage all       # rules: src/mvsr/tuning/derive.py -> data/runs/

@@ -191,6 +191,12 @@ class KeyframeManager:
     def keyframes(self) -> tuple[Keyframe, ...]:
         return tuple(entry.keyframe for entry in self._entries)
 
+    def observation(self, keyframe_id: int) -> ObjectObservation:
+        for entry in self._entries:
+            if entry.keyframe.keyframe_id == keyframe_id:
+                return entry.observation
+        raise KeyError(f"unknown keyframe_id {keyframe_id}")
+
     @property
     def T_base_obj_init(self) -> PoseSE3 | None:
         return self._T_base_obj_init

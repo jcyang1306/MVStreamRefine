@@ -12,6 +12,8 @@ dependencies = [
   "PyYAML>=6.0",
   # PNG IO and the optional recorder preview window (ADR-0006).
   "opencv-python>=4.8",
+  # P5 object-frame TSDF backend.
+  "open3d==0.19.0",
 ]
 
 [project.optional-dependencies]
@@ -60,7 +62,7 @@ check_untyped_defs = true
 
 [[tool.mypy.overrides]]
 # Optional GPU stack (P2 segmentation), imported lazily; no type stubs.
-module = ["torch", "torch.*", "sam2_inference", "sam2_inference.*"]
+module = ["torch", "torch.*", "sam2_inference", "sam2_inference.*", "open3d", "open3d.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

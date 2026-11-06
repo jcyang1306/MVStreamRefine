@@ -36,6 +36,13 @@ def test_tracking_cli_parses() -> None:
     assert gate.command == "i2-gate" and gate.sessions == []
 
 
+def test_mapping_cli_parses() -> None:
+    report = build_parser().parse_args(["mapping-report", "session"])
+    assert report.command == "mapping-report" and report.keyframe_memory is None
+    gate = build_parser().parse_args(["i3-gate"])
+    assert gate.command == "i3-gate" and gate.sessions == []
+
+
 def test_keyframe_cli_parses() -> None:
     report = build_parser().parse_args(["keyframe-report", "session", "--limit", "12"])
     assert report.command == "keyframe-report" and report.limit == 12

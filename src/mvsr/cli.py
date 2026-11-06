@@ -17,6 +17,8 @@
     mvsr i2-gate [<session_id ...>]                       # P3 gate (default: registry used_by I2)
     mvsr keyframe-report <session_id ...> [--mask-revision R]     # P4 benchmark -> runs/
     mvsr p4-gate [<session_id ...>]                       # P4 stage gate
+    mvsr mapping-report <session_id ...> [--keyframe-memory PATH] # P5 provisional map
+    mvsr i3-gate [<session_id ...>]                       # P5/I3 gate
     mvsr derive-params [--stage sensors|observation|all]  # recompute provisional parameters
     mvsr params-status                                    # DUE / MISMATCH vs configs/provisional_params.yaml
 
@@ -331,6 +333,28 @@ def _add_p4(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         p.add_argument("--tracking-config", type=Path, default=None, help="tracking YAML")
         p.add_argument("--observation-config", type=Path, default=None, help="observation YAML")
         p.add_argument("--json", action="store_true", help="print the full JSON report")
+    _add_p5(sub)
+
+
+def _add_p5(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    for name, helptext in (
+        ("mapping-report", "object-frame TSDF diagnostic (P5 M5) -> data/runs/"),
+        ("i3-gate", "I3 gate: P4 memory + P5 mapping (default: registry used_by I3)"),
+    ):
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument(
+            "sessions", nargs="*" if name == "i3-gate" else "+", help="session ids or dirs"
+        )
+        p.add_argument("--data-root", type=Path, default=None, help="override $MVSR_DATA_ROOT")
+        p.add_argument(
+            "--keyframe-memory",
+            type=Path,
+            default=None,
+            help="P4 memory directory (single session; default latest compatible run)",
+        )
+        p.add_argument("--mapping-config", type=Path, default=None, help="mapping YAML")
+        p.add_argument("--keyframe-config", type=Path, default=None, help="keyframe YAML")
+        p.add_argument("--json", action="store_true", help="print the full JSON report")
 
 
 def _cmd_segment(args: argparse.Namespace) -> int:
@@ -543,6 +567,59 @@ def _cmd_keyframe_memory(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_mapping(args: argparse.Namespace) -> int:
+    from mvsr.keyframes.config import load_keyframe_config
+    from mvsr.mapping.benchmark import (
+        find_latest_keyframe_memory,
+        i3_decision,
+        run_benchmark,
+        write_run,
+    )
+    from mvsr.mapping.config import load_mapping_config
+    from mvsr.paths import data_root, resolve_session_dir
+
+    root = args.data_root.resolve() if args.data_root else data_root()
+    mcfg = load_mapping_config(args.mapping_config)
+    kcfg = load_keyframe_config(args.keyframe_config)
+    sessions = list(args.sessions)
+    if args.command == "i3-gate" and not sessions:
+        from mvsr.io.registry import load_registry
+
+        sessions = [entry["session_id"] for entry in load_registry() if "I3" in entry["used_by"]]
+        if not sessions:
+            print("I3 decision: BLOCKED (no registry sessions used_by I3)", file=sys.stderr)
+            return 1
+    if args.keyframe_memory is not None and len(sessions) != 1:
+        raise ValueError("--keyframe-memory requires exactly one session")
+    results = []
+    for session in sessions:
+        path = resolve_session_dir(session, root)
+        memory = (
+            args.keyframe_memory
+            if args.keyframe_memory is not None
+            else find_latest_keyframe_memory(root, path.name)
+        )
+        results.append(run_benchmark(path, memory, mcfg, kcfg))
+    decision = i3_decision([result.report for result in results], mcfg)
+    run_dir = write_run(results, decision, mcfg, root)
+    reports = [result.report for result in results]
+    if args.json:
+        print(
+            json.dumps(
+                {"sessions": reports, "i3": decision, "run_dir": str(run_dir)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        from mvsr.mapping.report import format_report
+
+        print(format_report(reports, decision, run_dir))
+    if args.command == "i3-gate":
+        return 1 if decision["decision"] == "BLOCKED" else 0
+    return 0
+
+
 def _cmd_record(args: argparse.Namespace) -> int:
     from mvsr.record.config import load_record_config
     from mvsr.record.recorder import RecordRequest, run_recorder
@@ -724,6 +801,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "i2-gate": _cmd_track,
         "keyframe-report": _cmd_keyframe_memory,
         "p4-gate": _cmd_keyframe_memory,
+        "mapping-report": _cmd_mapping,
+        "i3-gate": _cmd_mapping,
         "derive-params": _cmd_derive,
         "params-status": _cmd_params_status,
     }
