@@ -59,9 +59,18 @@ Settings and placeholders: `configs/observation.yaml`; evidence and limits: `sub
 docker compose run --rm dev mvsr tracking-report <session_id> [--limit N]
 docker compose run --rm dev mvsr i2-gate      # registry sessions used_by I2
 ```
-P3 uses a bounded in-memory anchor window until P4 supplies durable keyframe memory. It does
-not chain poses frame-to-frame and does not perform BA or loop closure (ADR-0008). Settings:
+P3 can use its bounded bootstrap window or P4's durable keyframe provider. It does not chain
+poses frame-to-frame and does not perform BA or loop closure (ADR-0008). Settings:
 `configs/tracking.yaml`; evidence and limits: `subplans/03_TRACKING.md`.
+
+## P4 usage (deterministic keyframe memory)
+```bash
+docker compose run --rm dev mvsr keyframe-report <session_id> [--limit N]
+docker compose run --rm dev mvsr p4-gate      # registry sessions used_by P4
+```
+P4 replaces P3's temporary recent-anchor window with viewpoint/covisibility/appearance
+selection, bounded local retrieval and a checksummed restartable memory. The P4 stage gate
+does not claim I3: I3 additionally requires P5 mapping. Settings: `configs/keyframes.yaml`.
 
 ## Provisional parameters (data-derived, recompute with new data)
 ```bash

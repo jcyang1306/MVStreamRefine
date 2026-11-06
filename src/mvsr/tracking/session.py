@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 
 from mvsr.core.se3 import PoseSE3, so3_log
 from mvsr.core.types import (
+    Keyframe,
     KeyframeView,
     MapView,
     ObjectObservation,
@@ -37,6 +39,24 @@ class TrackingStep:
     local_keyframe_ids: tuple[int, ...]
 
 
+class AnchorMemory(Protocol):
+    @property
+    def all(self) -> tuple[KeyframeView, ...]: ...
+
+    def local(
+        self,
+        predicted: PoseSE3 | None,
+        maximum: int,
+        observation: ObjectObservation | None = None,
+    ) -> tuple[KeyframeView, ...]: ...
+
+    def consider(
+        self, observation: ObjectObservation, pose: PoseEstimate
+    ) -> Keyframe | int | None: ...
+
+    def reset(self) -> None: ...
+
+
 class AnchorWindow:
     def __init__(self, cfg: KeyframeConfig) -> None:
         self.cfg = cfg
@@ -47,7 +67,16 @@ class AnchorWindow:
     def all(self) -> tuple[KeyframeView, ...]:
         return tuple(self._keyframes)
 
-    def local(self, predicted: PoseSE3 | None, maximum: int) -> tuple[KeyframeView, ...]:
+    def reset(self) -> None:
+        self._keyframes.clear()
+        self._next_id = 0
+
+    def local(
+        self,
+        predicted: PoseSE3 | None,
+        maximum: int,
+        observation: ObjectObservation | None = None,
+    ) -> tuple[KeyframeView, ...]:
         if predicted is None:
             return tuple(self._keyframes[-maximum:])
         ranked = sorted(
@@ -89,30 +118,43 @@ class AnchorWindow:
             self._keyframes.pop(1)
         return kid
 
+    def consider(self, observation: ObjectObservation, pose: PoseEstimate) -> int | None:
+        if self.should_insert(observation, pose):
+            return self.insert(observation, pose)
+        return None
+
 
 class TrackingSession:
     """Build `TrackingReferences`, call the tracker, and maintain bounded anchors."""
 
-    def __init__(self, tracker: ObjectTracker, map_view: MapView | None = None) -> None:
+    def __init__(
+        self,
+        tracker: ObjectTracker,
+        map_view: MapView | None = None,
+        keyframe_memory: AnchorMemory | None = None,
+    ) -> None:
         self.tracker = tracker
-        self.window = AnchorWindow(tracker.cfg.keyframes)
+        self.window: AnchorMemory = keyframe_memory or AnchorWindow(tracker.cfg.keyframes)
         self.map_view = map_view
         self.previous: PoseEstimate | None = None
 
     def reset(self) -> None:
         self.tracker.reset()
-        self.window = AnchorWindow(self.tracker.cfg.keyframes)
+        self.window.reset()
         self.previous = None
 
     def process(self, frame: SensorFrame, observation: ObjectObservation) -> TrackingStep:
         predicted = self.tracker.predict(frame, self.previous)
         selection_pose = predicted or (None if self.previous is None else self.previous.T_cam_obj)
-        local = self.window.local(selection_pose, self.tracker.cfg.hypothesis.max_local_keyframes)
+        local = self.window.local(
+            selection_pose,
+            self.tracker.cfg.hypothesis.max_local_keyframes,
+            observation,
+        )
         refs = TrackingReferences(self.previous, predicted, local)
         pose = self.tracker.track(frame, observation, refs, self.map_view)
-        inserted = None
-        if self.window.should_insert(observation, pose):
-            inserted = self.window.insert(observation, pose)
+        considered = self.window.consider(observation, pose)
+        inserted = considered.keyframe_id if isinstance(considered, Keyframe) else considered
         self.previous = pose
         return TrackingStep(pose, inserted, tuple(k.keyframe_id for k in local))
 

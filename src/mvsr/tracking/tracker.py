@@ -141,6 +141,23 @@ class ObjectTracker:
         self._last_frame_id = None
         self._session_id = None
 
+    def restore(
+        self,
+        T_base_obj_init: PoseSE3,
+        previous: PoseEstimate | None = None,
+    ) -> None:
+        """Restore the immutable gauge before continuing from persisted keyframes."""
+        T_base_obj_init.expect_frames("base", "obj")
+        self.reset()
+        self.T_base_obj_init = T_base_obj_init
+        self.track_state = TrackState.TRACKING
+        if previous is not None:
+            if previous.T_cam_obj is None:
+                raise TrackingError("restored previous pose must be usable")
+            self._session_id = previous.header.session_id
+            self._last_frame_id = previous.header.frame_id
+            self._remember(previous)
+
     def predict(self, frame: SensorFrame, previous: PoseEstimate | None) -> PoseSE3 | None:
         """Constant-velocity object prediction in `base`, converted using the current robot prior."""
         T_base_cam = frame.T_base_cam_prior

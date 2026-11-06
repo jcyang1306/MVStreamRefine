@@ -1,0 +1,35 @@
+# P4 keyframe-memory configuration. Values are provisional on the single R-STATIC cup take.
+
+selection:
+  min_frame_spacing: 10
+  max_frame_gap: 60
+  min_keypoints: 30
+  min_geometry_points: 200
+  min_pose_overlap: 0.45
+  min_covisibility: 0.30
+  min_viewpoint_translation_m: 0.025
+  min_viewpoint_angle_deg: 8.0
+  min_appearance_hamming: 48
+  feature_grid_size: 4
+  min_spatial_novelty: 0.15
+
+retrieval:
+  max_local_keyframes: 8
+  max_global_keyframes: 64
+  visibility_voxel_m: 0.005
+  max_visibility_voxels: 2048
+  viewpoint_weight: 1.0
+  appearance_weight: 0.5
+  covisibility_weight: 1.0
+  min_viewpoint_separation_deg: 3.0
+
+persistence:
+  verify_raw_refs: true
+
+benchmark:
+  reproducibility_frames: 120
+
+gate:
+  max_keyframes: 64
+  min_best_anchor_hit_rate: 0.80
+  min_revisit_reuse_ratio: 0.50

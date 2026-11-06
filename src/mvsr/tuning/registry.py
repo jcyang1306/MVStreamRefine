@@ -23,6 +23,7 @@ CONFIG_FILES = {
     "sensors": "configs/sensors.yaml",
     "observation": "configs/observation.yaml",
     "tracking": "configs/tracking.yaml",
+    "keyframes": "configs/keyframes.yaml",
 }
 
 

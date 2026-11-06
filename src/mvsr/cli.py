@@ -15,6 +15,8 @@
     mvsr i1-gate [<session_id ...>]                       # P2 gate (default: registry used_by I1)
     mvsr tracking-report <session_id ...> [--mask-revision R]     # P3 benchmark -> runs/
     mvsr i2-gate [<session_id ...>]                       # P3 gate (default: registry used_by I2)
+    mvsr keyframe-report <session_id ...> [--mask-revision R]     # P4 benchmark -> runs/
+    mvsr p4-gate [<session_id ...>]                       # P4 stage gate
     mvsr derive-params [--stage sensors|observation|all]  # recompute provisional parameters
     mvsr params-status                                    # DUE / MISMATCH vs configs/provisional_params.yaml
 
@@ -310,6 +312,25 @@ def _add_p3(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         p.add_argument("--tracking-config", type=Path, default=None, help="tracking YAML")
         p.add_argument("--observation-config", type=Path, default=None, help="observation YAML")
         p.add_argument("--json", action="store_true", help="print the full JSON report")
+    _add_p4(sub)
+
+
+def _add_p4(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    for name, helptext in (
+        ("keyframe-report", "deterministic keyframe-memory benchmark (P4 K6) -> data/runs/"),
+        ("p4-gate", "P4 stage gate (default: registry used_by P4)"),
+    ):
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument(
+            "sessions", nargs="*" if name == "p4-gate" else "+", help="session ids or dirs"
+        )
+        p.add_argument("--data-root", type=Path, default=None, help="override $MVSR_DATA_ROOT")
+        p.add_argument("--mask-revision", default=None, help="default: the only complete revision")
+        p.add_argument("--limit", type=int, default=None, help="process only N frames")
+        p.add_argument("--keyframe-config", type=Path, default=None, help="keyframe YAML")
+        p.add_argument("--tracking-config", type=Path, default=None, help="tracking YAML")
+        p.add_argument("--observation-config", type=Path, default=None, help="observation YAML")
+        p.add_argument("--json", action="store_true", help="print the full JSON report")
 
 
 def _cmd_segment(args: argparse.Namespace) -> int:
@@ -467,6 +488,57 @@ def _cmd_track(args: argparse.Namespace) -> int:
 
         print(format_report(reports, decision, run_dir))
     if args.command == "i2-gate":
+        return 1 if decision is None or decision["decision"] == "BLOCKED" else 0
+    return 0
+
+
+def _cmd_keyframe_memory(args: argparse.Namespace) -> int:
+    from mvsr.keyframes.benchmark import run_benchmark, write_run
+    from mvsr.keyframes.config import load_keyframe_config
+    from mvsr.observation.config import load_observation_config
+    from mvsr.paths import resolve_session_dir
+    from mvsr.tracking.config import load_tracking_config
+
+    root = args.data_root and args.data_root.resolve()
+    kcfg = load_keyframe_config(args.keyframe_config)
+    tcfg = load_tracking_config(args.tracking_config)
+    ocfg = load_observation_config(args.observation_config)
+    sessions = list(args.sessions)
+    if args.command == "p4-gate" and not sessions:
+        from mvsr.io.registry import load_registry
+
+        sessions = [e["session_id"] for e in load_registry() if "P4" in e["used_by"]]
+        if not sessions:
+            print("P4 decision: BLOCKED (no registry sessions used_by P4)", file=sys.stderr)
+            return 1
+    reports, managers = [], []
+    for session in sessions:
+        path = resolve_session_dir(session, root)
+        report, manager = run_benchmark(
+            path,
+            _pick_revision(path, args.mask_revision),
+            kcfg,
+            tcfg,
+            ocfg,
+            limit=args.limit,
+        )
+        reports.append(report)
+        managers.append(manager)
+    decision: dict[str, Any] | None = {} if args.command == "p4-gate" else None
+    run_dir = write_run(reports, managers, decision, kcfg, tcfg, ocfg, root)
+    if args.json:
+        print(
+            json.dumps(
+                {"sessions": reports, "p4": decision, "run_dir": str(run_dir)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        from mvsr.keyframes.report import format_report
+
+        print(format_report(reports, decision, run_dir))
+    if args.command == "p4-gate":
         return 1 if decision is None or decision["decision"] == "BLOCKED" else 0
     return 0
 
@@ -650,6 +722,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "i1-gate": _cmd_observe,
         "tracking-report": _cmd_track,
         "i2-gate": _cmd_track,
+        "keyframe-report": _cmd_keyframe_memory,
+        "p4-gate": _cmd_keyframe_memory,
         "derive-params": _cmd_derive,
         "params-status": _cmd_params_status,
     }

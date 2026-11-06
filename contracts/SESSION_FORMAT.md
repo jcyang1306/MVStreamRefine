@@ -18,8 +18,18 @@ $MVSR_DATA_ROOT/sessions/<session_id>/      # MVSR_DATA_ROOT defaults to ./data 
 ├── robot.jsonl                   # every robot sample (not only paired ones)
 ├── events.jsonl                  # operator actions, scenario annotations, warnings, errors
 └── derived/
-    └── masks/<camera_id>/<mask_revision>/<frame_id:06d>.png  # 0/255, plus masks.jsonl with scores
+    ├── masks/<camera_id>/<mask_revision>/<frame_id:06d>.png  # 0/255, plus masks.jsonl with scores
+    └── keyframes/ (optional export location; P4 run artifacts normally live under data/runs/)
 ```
+
+P4 run artifacts contain `keyframes/<session_id>/manifest.json`, immutable
+`observations/<keyframe_id>.npz` and checksummed `keyframes/<keyframe_id>.json`. A keyframe
+stores references and sha256 values for the source color/depth/mask; it never copies over or
+modifies raw session files. The memory manifest is written last, so an interrupted directory
+without it is incomplete and rejected. `observation_ref` is relative to the keyframe-memory
+root; color/depth/mask refs are relative to the source session root. Absolute paths, parent
+traversal and symlink escape are invalid. The manifest persists `T_base_obj_init`,
+`calibration_id` and `next_keyframe_id` for deterministic restart.
 
 ## manifest.json
 Required keys: `schema_version`, `session_id`, `status` (`RECORDING | COMPLETE | ABORTED`), `created_utc`, `host`, `software` (package version + git hash + dirty flag), `robot` (model, endpoint, SDK version, state source `udp_push|poll`, nominal rate), `cameras` (per `camera_id`: model, serial, firmware, mount `wrist|fixed`, `calibration_id`, `depth_units_m`, `color_codec`, resolution, fps, formats, device options/preset, emitter/laser, exposure mode, post-filters), `clock` (host realtime/monotonic pairs at start and end), `scenario` (tags from ADR-0002, object name, GT type, operator notes), `counts` (per camera frames seen / written / dropped; robot samples / failures), `disk` (free bytes at start/end), `files` (relative path → sha256 for every non-image file; per-image checksums live in `frames.jsonl`).

@@ -36,6 +36,13 @@ def test_tracking_cli_parses() -> None:
     assert gate.command == "i2-gate" and gate.sessions == []
 
 
+def test_keyframe_cli_parses() -> None:
+    report = build_parser().parse_args(["keyframe-report", "session", "--limit", "12"])
+    assert report.command == "keyframe-report" and report.limit == 12
+    gate = build_parser().parse_args(["p4-gate"])
+    assert gate.command == "p4-gate" and gate.sessions == []
+
+
 def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--version"])

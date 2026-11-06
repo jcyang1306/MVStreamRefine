@@ -152,3 +152,40 @@
   rule: "at most about one second between candidate anchors at 30 fps; P4 replaces the temporary bounded-window policy"
   evidence: data/runs/20261105T044934_CW20175_98b0
   recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+
+# --------------------------------------------------------------------- keyframe memory (P4)
+- key: keyframes.selection.min_frame_spacing
+  value: 10
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "about one third second at 30 fps; full take selected 64 keyframes and reused 637 revisit observations"
+  evidence: data/runs/20261105T102446_CW20175_967d
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: keyframes.selection.min_covisibility
+  value: 0.3
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "Jaccard threshold on 5 mm object-frame visibility voxels; paired with appearance and viewpoint checks"
+  evidence: data/runs/20261105T102446_CW20175_967d
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: keyframes.selection.min_viewpoint_angle_deg
+  value: 8.0
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "provisional reachable-arc viewpoint novelty / revisit threshold"
+  evidence: data/runs/20261105T102446_CW20175_967d
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: keyframes.retrieval.max_global_keyframes
+  value: 64
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "bounded memory cap reached on the 1090-frame take (97 later insertions rejected); increase only with measured coverage gain"
+  evidence: data/runs/20261105T102446_CW20175_967d
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
+- key: keyframes.retrieval.min_viewpoint_separation_deg
+  value: 3.0
+  derived_on: 2026-11-05
+  basis: [20261028T080558_CW20175_9fb3]
+  rule: "greedy local-window diversity; full-take best-anchor retrieval hit rate 1.0"
+  evidence: data/runs/20261105T102446_CW20175_967d
+  recheck_when: {scenarios: [R-STATIC, R-MARKER, R-BOTH], min_new: 1}
